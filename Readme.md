@@ -1,6 +1,6 @@
 # PowerShell Config
 
-Here is my Curstom PowerShell Profile
+Here is my Custom PowerShell Profile
 
 Put content on your ```$PROFILE``` folder
 
