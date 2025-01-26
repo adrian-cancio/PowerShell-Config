@@ -1,35 +1,126 @@
-if ($env:USER.length -eq 0) {
-    $env:USER = $env:USERNAME
+# ----------------------------------
+# 1) Path for the Settings File
+# ----------------------------------
+$ProfileFolder = Split-Path -Parent $PROFILE
+$Global:SettingsFile = Join-Path $ProfileFolder "pwshProfileSettings.json"
+
+# ----------------------------------
+# 2) Default Values
+# ----------------------------------
+$Global:DefaultSettings = [ordered]@{
+    "PromptColorScheme"    = "Random"        # Default prompt color scheme
+    "DefaultPrompt"        = $false          # If true, use PowerShell's default prompt instead of the custom one
+    "AskCreateCodeFolder"  = $true           # Whether to ask for the creation of the "Code" folder if missing
+    "CodeFolderName"       = "Code"          # Default name for the code folder
+    "EnableRandomTitle"    = $false          # Enables "Hackerman" style random PowerShell title
 }
+
+# ----------------------------------
+# 3) Function to Load User Settings
+# ----------------------------------
+function Load-UserSettings {
+    param(
+        [string]$Path
+    )
+
+    # If the file does not exist, create it using default values
+    if (-not (Test-Path $Path)) {
+        Write-Host "File '$Path' does not exist. Creating default settings file..."
+        $DefaultJson = ($Global:DefaultSettings | ConvertTo-Json -Depth 10)
+        $DefaultJson | Out-File -FilePath $Path -Encoding UTF8
+        return $Global:DefaultSettings
+    }
+    else {
+        # Try to read and parse JSON
+        try {
+            $jsonContent = Get-Content -Path $Path -Raw
+            $parsed = $null
+            if ($jsonContent) {
+                $parsed = $jsonContent | ConvertFrom-Json
+            }
+
+            if (-not $parsed) {
+                Write-Warning "The file '$Path' is empty or not valid JSON. Default values will be used."
+                return $Global:DefaultSettings
+            }
+
+            # Convert the $parsed object to a hashtable and merge with DefaultSettings
+            $userSettings = @{}
+            foreach ($key in $parsed.psobject.Properties.Name) {
+                $userSettings[$key] = $parsed."$key"
+            }
+
+            # For each default key, if not present in userSettings, assign the default one
+            foreach ($defaultKey in $Global:DefaultSettings.Keys) {
+                if (-not $userSettings.ContainsKey($defaultKey)) {
+                    $userSettings[$defaultKey] = $Global:DefaultSettings[$defaultKey]
+                }
+            }
+
+            return $userSettings
+        }
+        catch {
+            Write-Warning "Could not read or parse '$Path': $_"
+            Write-Warning "Default values will be used."
+            return $Global:DefaultSettings
+        }
+    }
+}
+
+# ----------------------------------
+# 4) Load settings into a global variable
+# ----------------------------------
+$Global:UserSettings = Load-UserSettings $Global:SettingsFile
+
+# ----------------------------------
+# 5) Functions to Save User Settings (optional)
+#    Use them if you want to modify values and
+#    persist them into the JSON file.
+# ----------------------------------
+function Save-UserSettings {
+    param(
+        [hashtable]$NewSettings
+    )
+    $json = $NewSettings | ConvertTo-Json -Depth 10
+    $json | Out-File -FilePath $Global:SettingsFile -Encoding UTF8
+}
+
 Enum OS {
     Windows
     Linux
     MacOS
 }
+
 $Kernel = if ($IsWindows) {
-    [OS]::Windows 
+    [OS]::Windows
 }
 elseif ($IsLinux) {
-    [OS]::Linux 
+    [OS]::Linux
 }
 elseif ($IsMacOS) {
-    [OS]::MacOS 
+    [OS]::MacOS
 }
+
 [String]$SPWD
 $DirArray = @()
 
-$CODE = Join-Path -Path $HOME -ChildPath "Code"
-# If code folder not exists, ask user to create it
-$AskCreateCodeFolder = $true
+# ------------------------------------------------------
+# Handle 'Code' folder based on loaded User Settings
+# ------------------------------------------------------
+$CODE = Join-Path -Path $HOME -ChildPath $Global:UserSettings["CodeFolderName"]
+$AskCreateCodeFolder = $Global:UserSettings["AskCreateCodeFolder"]
+
 if (!(Test-Path -Path $CODE) -and $AskCreateCodeFolder) {
     $CreateCodeFolder = Read-Host "`'$CODE`' folder not exists, create it? (Y/N)"
     if ($CreateCodeFolder -eq "Y") {
-        New-Item -Path $CODE -ItemType Directory
+        New-Item -Path $CODE -ItemType Directory | Out-Null
     }
 }
 
+# ----------------------------------
+# PromptColorSchemes enum
+# ----------------------------------
 enum PromptColorSchemes {
-    # Normal Schemes
     Default
     Blue
     Green
@@ -38,25 +129,28 @@ enum PromptColorSchemes {
     Magenta
     Yellow
     Gray
-    # Special Schemes
     Random
     Asturias
     Spain
     Hackerman
 }
 
+# ----------------------------------
+# Function to set the color scheme
+# ----------------------------------
 function Set-PromptColorScheme {
     [CmdletBinding()]
     param (
-        [PromptColorSchemes]$ColorScheme = $PromptColorScheme
+        [PromptColorSchemes]$ColorScheme
     )
 
-    if ($ColorScheme -eq $ColorScheme::Hackerman) {
-        Set-RandomPowerShellTitle
+    if ($ColorScheme -eq [PromptColorSchemes]::Hackerman) {
+        if ($Global:UserSettings["EnableRandomTitle"]) {
+            Set-RandomPowerShellTitle
+        }
     }
 
-    # Primary Colors: Blue, Green Cyan, Red, Magenta, Yellow, White, Gray
-    
+    # Color palette
     $Colors = @{
         "Blue"    = @([ConsoleColor]::Blue, [ConsoleColor]::DarkBlue)
         "Green"   = @([ConsoleColor]::Green, [ConsoleColor]::DarkGreen)
@@ -67,9 +161,7 @@ function Set-PromptColorScheme {
         "White"   = @([ConsoleColor]::White, [ConsoleColor]::DarkGray)
         "Gray"    = @([ConsoleColor]::Gray, [ConsoleColor]::DarkGray)
     }
-    
 
-    
     $ColorSchemes = @{
         [PromptColorSchemes]::Default   = $Colors["White"]
         [PromptColorSchemes]::Blue      = $Colors["Blue"]
@@ -79,19 +171,22 @@ function Set-PromptColorScheme {
         [PromptColorSchemes]::Magenta   = $Colors["Magenta"]
         [PromptColorSchemes]::Yellow    = $Colors["Yellow"]
         [PromptColorSchemes]::Gray      = $Colors["Gray"]
-        [PromptColorSchemes]::Random    = @($Colors[$($Colors.Keys | Get-Random)][0], $Colors[$($Colors.Keys | Get-Random)][1])
+        [PromptColorSchemes]::Random    = @(
+            $Colors[$($Colors.Keys | Get-Random)][0],
+            $Colors[$($Colors.Keys | Get-Random)][1]
+        )
         [PromptColorSchemes]::Asturias  = @($Colors["Blue"][0], $Colors["Yellow"][1])
         [PromptColorSchemes]::Spain     = @($Colors["Red"][0], $Colors["Yellow"][1])
         [PromptColorSchemes]::Hackerman = @($Colors["Green"][0], $Colors["Gray"][1])
-        
     }
-    Write-Debug "ColorScheme: $ColorScheme"
-    # Write-Host $ColorScheme
+
     $Global:PromptColorScheme = $ColorScheme
     $Global:PromptColors = $ColorSchemes[$ColorScheme]
 }
 
-# Variantes para cada letra del nombre 'PowerShell'
+# ----------------------------------
+# Variations for 'Hackerman' title
+# ----------------------------------
 $RandomP = @("p", "P", "ρ", "¶", "₱", "ℙ", "℗", "𝒫", "𝓟", "𝔓", "𝕻", "𝖯", "𝗣", "𝘗", "𝙋", "𝚙", "𝚙", "𝖕", "𝗽", "𝘱")
 $RandomO = @("o", "O", "0", "ø", "ɵ", "º", "θ", "ω", "ჿ", "ᴏ", "ᴑ", "⊝", "Ο", "ο", "𝐨", "𝐎", "𝑂", "𝑜", "𝒐", "𝒪")
 $RandomW = @("w", "W", "ω", "ѡ", "ẁ", "ẃ", "ẅ", "ẇ", "ѡ", "ѿ", "ᴡ", "𝐰", "𝑤", "𝑾", "𝒲", "𝓌", "𝔀", "𝔚", "𝔴", "𝕎")
@@ -101,8 +196,6 @@ $RandomS = @("s", "S", "5", "$", "§", "∫", "š", "ś", "ş", "ς", "ș", "ƨ"
 $RandomH = @("h", "H", "#", "η", "ħ", "һ", "ḥ", "ḧ", "ḩ", "ḣ", "ℎ", "ℋ", "ℌ", "𝒽", "𝐡", "𝐇", "𝐻", "𝒉", "𝓗", "𝕳")
 $RandomL = @("l", "L", "1", "!", "|", "ł", "£", "ℓ", "ľ", "ĺ", "ℒ", "Ⅼ", "Ι", "𝐥", "𝐋", "𝑙", "𝐿", "𝑳", "𝓵", "𝓛")
 
-
-# Función para establecer un título aleatorio de PowerShell
 function Set-RandomPowerShellTitle {
     $title = ""
     $title += $RandomP | Get-Random
@@ -115,70 +208,79 @@ function Set-RandomPowerShellTitle {
     $title += $RandomE | Get-Random
     $title += $RandomL | Get-Random
     $title += $RandomL | Get-Random
-
     $Host.UI.RawUI.WindowTitle = $title
 }
 
 [ConsoleColor[]]$PromptColors = @()
 
-$PromptColorScheme = [PromptColorSchemes]::Random
-$DefaultPrompt = $false
+# Read preferred color scheme from the settings
+$desiredColorScheme = $Global:UserSettings["PromptColorScheme"] -as [PromptColorSchemes]
+if (-not $desiredColorScheme) {
+    $desiredColorScheme = [PromptColorSchemes]::Random
+}
 
-# Custom Prompt if enabled
+# Read if we want the default prompt
+$DefaultPrompt = $Global:UserSettings["DefaultPrompt"]
+
+# ----------------------------------
+# Custom Prompt
+# ----------------------------------
 function Prompt() {
-	
+
+    # Always set a window title
     $Host.UI.RawUI.WindowTitle = "PowerShell"
-    
+
     if ($DefaultPrompt) {
-        Write-Host "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1))" -nonewline
+        Write-Host "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1))" -NoNewline
         return " "
     }
 
-    Set-PromptColorScheme -ColorScheme $PromptColorScheme
+    # Set the color scheme
+    Set-PromptColorScheme -ColorScheme $desiredColorScheme
 
-    Write-Host "||" -nonewline -ForegroundColor $PromptColors[1]
-    Write-Host $env:USER -nonewline -ForegroundColor $PromptColors[0]
-    Write-Host "@" -nonewline -ForegroundColor $PromptColors[1]
-    Write-Host $Kernel -nonewline -ForegroundColor $PromptColors[0]
-    Write-Host "|-|" -nonewline -ForegroundColor $PromptColors[1]
-    
+    Write-Host "||" -NoNewline -ForegroundColor $PromptColors[1]
+    Write-Host $env:USER -NoNewline -ForegroundColor $PromptColors[0]
+    Write-Host "@" -NoNewline -ForegroundColor $PromptColors[1]
+    Write-Host $Kernel -NoNewline -ForegroundColor $PromptColors[0]
+    Write-Host "|-|" -NoNewline -ForegroundColor $PromptColors[1]
+
     $SPWD = if ($PWD.Path.StartsWith($HOME)) {
         "~$([IO.Path]::DirectorySeparatorChar)$($PWD.Path.Substring($HOME.Length))"
     }
     else {
-        $PWD.Path 
+        $PWD.Path
     }
     $DirArray = $SPWD.Split([IO.Path]::DirectorySeparatorChar)
 
     $IsFirstFolder = $true
     foreach ($FolderName in $DirArray) {
-        if ($FolderName.length -eq 0) {
+        if ($FolderName.Length -eq 0) {
             continue
         }
         if (!$IsFirstFolder -or ($FolderName -ne "~" -and !$IsWindows)) {
-            Write-Host $([IO.Path]::DirectorySeparatorChar) -nonewline -ForegroundColor $PromptColors[1]
+            Write-Host $([IO.Path]::DirectorySeparatorChar) -NoNewline -ForegroundColor $PromptColors[1]
         }
-        Write-Host $FolderName -nonewline -ForegroundColor $PromptColors[0]
+        Write-Host $FolderName -NoNewline -ForegroundColor $PromptColors[0]
         $IsFirstFolder = $false
     }
-    
-    Write-Host "||`n" -nonewline -ForegroundColor $PromptColors[1]
-    Write-Host $("|>" * ($NestedPromptLevel + 1)) -nonewline -ForegroundColor $PromptColors[1]
+
+    Write-Host "||`n" -NoNewline -ForegroundColor $PromptColors[1]
+    Write-Host $("|>" * ($NestedPromptLevel + 1)) -NoNewline -ForegroundColor $PromptColors[1]
     return " "
 }
 
-# Save the current directory to the clipboard
+# ---------------------------------------------------------------------------
+# OTHER FUNCTIONS (mostly unchanged, just relocated in the profile)
+# ---------------------------------------------------------------------------
 function Set-PWDClipboard {
-    Set-Clipboard $PWD 
+    Set-Clipboard $PWD
 }
 
-# Get Public IP
 function Get-PublicIP {
     $PublicIP = Invoke-RestMethod -Uri "https://api.ipify.org"
     return $PublicIP
 }
 
-# Get Disk Space
 function Get-DiskSpace {
     $drives = Get-PSDrive -PSProvider FileSystem | ForEach-Object {
         [PSCustomObject]@{
@@ -191,38 +293,34 @@ function Get-DiskSpace {
     $drives | Format-Table -AutoSize
 }
 
-# Get weather of a place
 function Get-Weather {
     param (
         [string]$Place,
         [String]$Language
     )
 
-
     if (-not $Place) {
-        #Get current city from IP
+        # Get current city from IP
         $Place = (Invoke-RestMethod -Uri "https://ipinfo.io").city
         while (-not $Place) {
             $Place = (Invoke-RestMethod -Uri "https://ipinfo.io").city
-            # Wait for 1 second
             Start-Sleep -Seconds 1
         }
     }
 
     if (-not $Language) {
-        # Set default language to current System language, but only the first two characters
         $Language = (Get-Culture).Name.Substring(0, 2)
     }
 
     $Response = ""
     try {
-        $RequestUri = "https://wttr.in/~" + $Place + "?lang=$Language"
+        $RequestUri = "https://wttr.in/~$Place?lang=$Language"
         $Response = Invoke-RestMethod -Uri $RequestUri -ErrorAction SilentlyContinue
     }
     catch {
         return "Error: The place '$Place' is not found"
     }
-    
+
     return $Response
 }
 
@@ -231,15 +329,11 @@ function Get-ChtShHelp {
         [Parameter(Mandatory = $true)]
         [string]$Command
     )
-
     try {
-        # Make the request to cht.sh and get the content
         $response = Invoke-WebRequest -Uri "https://cht.sh/$Command" -UseBasicParsing
-        # Return the help content
         return $response.Content
     }
     catch {
-        # Handle network or request errors
         Write-Error "Failed to retrieve help for the command '$Command'. Check your connection or the command entered."
     }
 }
@@ -250,8 +344,6 @@ function Get-PowershellChtShHelp {
         [string]$Command
     )
     Get-ChtShHelp -Command "powershell/$Command"
-
-    
 }
 
 function Stop-ProcessConstantly {
@@ -263,21 +355,25 @@ function Stop-ProcessConstantly {
     $i = 0
     while ($true) {
         try {
-            # Intentar detener el proceso
             Stop-Process -Name $ProcessName -ErrorAction Stop
             $i++
-            Write-Host "[$i] - Proceso '$ProcessName' detenido correctamente." -ForegroundColor Green
-        } catch {
-            # Ignorar errores si el proceso no está en ejecución
+            Write-Host "[$i] - Process '$ProcessName' stopped successfully." -ForegroundColor Green
+        }
+        catch {
             continue
         }
     }
 }
 
-# Github copilot aliases generated by the command `gh copilot alias pwsh`
+# Aliases
+Set-Alias -Name vim -Value nvim
+Set-Alias -Name vi -Value vim
+Set-Alias -Name gvim -Value vim
+Set-Alias -Name wrh -Value Write-Host
+Set-Alias -Name cpwd -Value Set-PWDClipboard
+
+# Copilot aliases
 function ghcs {
-    # Debug support provided by common PowerShell function parameters, which is natively aliased as -d or -db
-    # https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_commonparameters?view=powershell-7.4#-debug
     param(
         [ValidateSet('gh', 'git', 'shell')]
         [Alias('t')]
@@ -287,29 +383,20 @@ function ghcs {
         [string]$Prompt
     )
     begin {
-        # Create temporary file to store potential command user wants to execute when exiting
         $executeCommandFile = New-TemporaryFile
-
-        # Store original value of GH_DEBUG environment variable
         $envGhDebug = $Env:GH_DEBUG
     }
     process {
         if ($PSBoundParameters['Debug']) {
             $Env:GH_DEBUG = 'api'
         }
-
         gh copilot suggest -t $Target -s "$executeCommandFile" $Prompt
     }
     end {
-        # Execute command contained within temporary file if it is not empty
         if ($executeCommandFile.Length -gt 0) {
-            # Extract command to execute from temporary file
             $executeCommand = (Get-Content -Path $executeCommandFile -Raw).Trim()
-
-            # Insert command into PowerShell up/down arrow key history
             [Microsoft.PowerShell.PSConsoleReadLine]::AddToHistory($executeCommand)
 
-            # Insert command into PowerShell history
             $now = Get-Date
             $executeCommandHistoryItem = [PSCustomObject]@{
                 CommandLine        = $executeCommand
@@ -319,48 +406,31 @@ function ghcs {
             }
             Add-History -InputObject $executeCommandHistoryItem
 
-            # Execute command
             Write-Host "`n"
             Invoke-Expression $executeCommand
         }
     }
     clean {
-        # Clean up temporary file used to store potential command user wants to execute when exiting
         Remove-Item -Path $executeCommandFile
-
-        # Restore GH_DEBUG environment variable to its original value
         $Env:GH_DEBUG = $envGhDebug
     }
 }
 
 function ghce {
-    # Debug support provided by common PowerShell function parameters, which is natively aliased as -d or -db
-    # https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_commonparameters?view=powershell-7.4#-debug
     param(
         [Parameter(Position = 0, ValueFromRemainingArguments)]
         [string[]]$Prompt
     )
     begin {
-        # Store original value of GH_DEBUG environment variable
         $envGhDebug = $Env:GH_DEBUG
     }
     process {
         if ($PSBoundParameters['Debug']) {
             $Env:GH_DEBUG = 'api'
         }
-
         gh copilot explain $Prompt
     }
     clean {
-        # Restore GH_DEBUG environment variable to its original value
         $Env:GH_DEBUG = $envGhDebug
     }
 }
-
-# Alias
-Set-Alias -Name vim -Value nvim
-Set-Alias -Name vi -Value vim
-Set-Alias -Name gvim -Value vim
-Set-Alias -Name wrh -Value Write-Host
-Set-Alias -Name cpwd -Value Set-PWDClipboard
-
