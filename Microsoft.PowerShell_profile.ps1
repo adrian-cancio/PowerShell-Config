@@ -103,6 +103,10 @@ elseif ($IsMacOS) {
     [OS]::MacOS
 }
 
+if ($IsWindows) {
+    $env:USER = $env:USERNAME
+}
+
 [String]$SPWD
 $DirArray = @()
 
