@@ -2,13 +2,14 @@
 # 1) Path for the Settings File
 # ----------------------------------
 $ProfileFolder = Split-Path -Parent $PROFILE
-$Global:SettingsFile = Join-Path $ProfileFolder "pwshProfileSettings.json"
+$SettingsFileName = "pwshProfileSettings.json"
+$Global:SettingsFile = Join-Path $ProfileFolder $SettingsFileName
 
 # ----------------------------------
 # 2) Default Values
 # ----------------------------------
 $Global:DefaultSettings = [ordered]@{
-    "PromptColorScheme"    = "Random"        # Default prompt color scheme
+    "PromptColorScheme"    = "Default"        # Default prompt color scheme
     "DefaultPrompt"        = $false          # If true, use PowerShell's default prompt instead of the custom one
     "AskCreateCodeFolder"  = $true           # Whether to ask for the creation of the "Code" folder if missing
     "CodeFolderName"       = "Code"          # Default name for the code folder
@@ -20,7 +21,7 @@ $Global:DefaultSettings = [ordered]@{
 # ----------------------------------
 function Load-UserSettings {
     param(
-        [string]$Path
+        [string]$Path = $Global:SettingsFile
     )
 
     # If the file does not exist, create it using default values
@@ -57,6 +58,7 @@ function Load-UserSettings {
                 }
             }
 
+            $Global:UserSettings = $userSettings
             return $userSettings
         }
         catch {
@@ -79,7 +81,7 @@ $Global:UserSettings = Load-UserSettings $Global:SettingsFile
 # ----------------------------------
 function Save-UserSettings {
     param(
-        [hashtable]$NewSettings
+        [hashtable]$NewSettings = $Global:Usersettings
     )
     $json = $NewSettings | ConvertTo-Json -Depth 10
     $json | Out-File -FilePath $Global:SettingsFile -Encoding UTF8
@@ -180,8 +182,8 @@ function Set-PromptColorScheme {
         [PromptColorSchemes]::Hackerman = @($Colors["Green"][0], $Colors["Gray"][1])
     }
 
-    $Global:PromptColorScheme = $ColorScheme
-    $Global:PromptColors = $ColorSchemes[$ColorScheme]
+    $Global:PromptColors = $ColorSchemes[$ColorScheme]    
+    $Global:UserSettings["PromptColorScheme"] = $ColorScheme.toString()
 }
 
 # ----------------------------------
@@ -213,12 +215,6 @@ function Set-RandomPowerShellTitle {
 
 [ConsoleColor[]]$PromptColors = @()
 
-# Read preferred color scheme from the settings
-$desiredColorScheme = $Global:UserSettings["PromptColorScheme"] -as [PromptColorSchemes]
-if (-not $desiredColorScheme) {
-    $desiredColorScheme = [PromptColorSchemes]::Random
-}
-
 # Read if we want the default prompt
 $DefaultPrompt = $Global:UserSettings["DefaultPrompt"]
 
@@ -236,7 +232,7 @@ function Prompt() {
     }
 
     # Set the color scheme
-    Set-PromptColorScheme -ColorScheme $desiredColorScheme
+    Set-PromptColorScheme -ColorScheme $Global:UserSettings["PromptColorScheme"]
 
     Write-Host "||" -NoNewline -ForegroundColor $PromptColors[1]
     Write-Host $env:USER -NoNewline -ForegroundColor $PromptColors[0]
