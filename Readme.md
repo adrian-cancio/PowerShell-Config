@@ -71,7 +71,7 @@ You can **manually edit** `pwshProfileSettings.json` at any time to change these
 
 The script sets a custom prompt that typically looks like:
 ```
-||username@Windows|-|C:\Users\username\Documents||
+||username@Windows|-|~\Documents\Powershell||
 |>
 ```
 (or on Linux):
