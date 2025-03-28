@@ -89,6 +89,7 @@ The **colors** are controlled by your `PromptColorScheme`. If you set `"DefaultP
 - **Get-Weather**: Fetches weather information from `wttr.in` for a given location.
 - **Get-ChtShHelp** / **Get-PowershellChtShHelp**: Queries [cht.sh](https://cht.sh) for command-line or PowerShell-specific help.
 - **Stop-ProcessConstantly**: Repeatedly attempts to stop a process by name.
+- **Get-ContentRecursiveIgnore**: Recursively retrieves content from non-ignored files, respecting `.gitignore` and additional ignore patterns.
 
 ### 3.5. Aliases
 

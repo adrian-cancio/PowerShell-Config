@@ -9,11 +9,11 @@ $Global:SettingsFile = Join-Path $ProfileFolder $SettingsFileName
 # 2) Default Values
 # ----------------------------------
 $Global:DefaultSettings = [ordered]@{
-    "PromptColorScheme"    = "Default"        # Default prompt color scheme
-    "DefaultPrompt"        = $false          # If true, use PowerShell's default prompt instead of the custom one
-    "AskCreateCodeFolder"  = $true           # Whether to ask for the creation of the "Code" folder if missing
-    "CodeFolderName"       = "Code"          # Default name for the code folder
-    "EnableRandomTitle"    = $false          # Enables "Hackerman" style random PowerShell title
+    "PromptColorScheme"   = "Default"        # Default prompt color scheme
+    "DefaultPrompt"       = $false          # If true, use PowerShell's default prompt instead of the custom one
+    "AskCreateCodeFolder" = $true           # Whether to ask for the creation of the "Code" folder if missing
+    "CodeFolderName"      = "Code"          # Default name for the code folder
+    "EnableRandomTitle"   = $false          # Enables "Hackerman" style random PowerShell title
 }
 
 # ----------------------------------
@@ -362,6 +362,201 @@ function Stop-ProcessConstantly {
         catch {
             continue
         }
+    }
+}
+
+<#
+.SYNOPSIS
+    Recursively get content from non-ignored files, respecting .gitignore and optionally additional ignore patterns.
+
+.DESCRIPTION
+    This function:
+    1) Gathers all items (files and directories) recursively from the specified path.
+    2) Filters out:
+       - Items whose name starts with a period (e.g. .git, .hidden).
+       - Items with the Hidden attribute (Windows).
+       - Items ignored by .gitignore (with approximate Git semantics).
+       - Items matching any additional user-specified ignore patterns.
+    3) Prints the content of remaining (not ignored) files, preceded by their relative path.
+
+.PARAMETER Path
+    The root directory to scan. Defaults to the current directory (".").
+
+.PARAMETER AdditionalIgnore
+    An array of extra ignore patterns in PowerShell wildcard style (e.g. "*.log", "node_modules", "dist/*").
+    These are applied after .gitignore patterns and have the same precedence rules (last match wins).
+    If you pass a pattern here, any file/folder matching it will be ignored.
+
+.EXAMPLE
+    Get-ContentRecursiveIgnore -Path "C:\MyProject"
+
+    Recursively scans C:\MyProject, respecting .gitignore and ignoring hidden items.
+    Prints the content of each non-ignored file.
+
+.EXAMPLE
+    Get-ContentRecursiveIgnore -AdditionalIgnore @("*.log", "temp/*")
+
+    Same as above, but also ignores any .log files and anything under a folder named 'temp'.
+
+.NOTES
+    This script does not fully replicate Git’s behavior.
+    However, it handles core use cases:
+      - Patterns without wildcards match both the exact path and its subpaths ("dir" => "dir" or "dir/subfile").
+      - Patterns with wildcards (* or ?) use PowerShell’s -like.
+      - Lines starting with '!' act as negation (unignore).
+      - Leading '/' means 'from the root'; we drop it, but keep in mind Git has more nuanced anchoring rules.
+#>
+function Get-ContentRecursiveIgnore {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$false)]
+        [string]$Path = ".",
+
+        [Parameter(Mandatory=$false)]
+        [string[]]$AdditionalIgnore = @()
+    )
+
+    # 1) Read .gitignore (if present) to build a list of patterns
+    $gitignoreFile = Join-Path $Path ".gitignore"
+    $rawGitignoreLines = @()
+    if (Test-Path $gitignoreFile) {
+        $rawGitignoreLines = Get-Content $gitignoreFile -ErrorAction SilentlyContinue
+    }
+
+    # Convert .gitignore lines to an object with {Pattern, Negated} fields
+    function Convert-GitignoreLine {
+        param([string] $line)
+
+        $trimmed = $line.Trim()
+        # Skip empty lines or comments
+        if ($trimmed -match '^(#|\s*$)') {
+            return $null
+        }
+
+        $negated = $false
+        if ($trimmed.StartsWith('!')) {
+            $negated = $true
+            $trimmed = $trimmed.Substring(1).Trim()
+        }
+        # If starts with '/', remove it (Git => anchored, we do approximate logic)
+        if ($trimmed.StartsWith('/')) {
+            $trimmed = $trimmed.Substring(1)
+        }
+        return [pscustomobject]@{
+            Pattern = $trimmed
+            Negated = $negated
+        }
+    }
+
+    $gitignorePatterns = @()
+    foreach ($line in $rawGitignoreLines) {
+        $obj = Convert-GitignoreLine $line
+        if ($obj) {
+            $gitignorePatterns += $obj
+        }
+    }
+
+    # Convert AdditionalIgnore patterns into the same structure
+    # We'll treat them as if they were lines in .gitignore
+    $extraPatterns = @()
+    foreach ($pat in $AdditionalIgnore) {
+        $trimmed = $pat.Trim()
+        if (-not [string]::IsNullOrWhiteSpace($trimmed)) {
+            # AdditionalIgnore can't have a '!' to unignore, but let's allow it for consistency
+            $negated = $false
+            if ($trimmed.StartsWith('!')) {
+                $negated = $true
+                $trimmed = $trimmed.Substring(1).Trim()
+            }
+            # No slash logic here, user can pass what they want
+            $extraPatterns += [pscustomobject]@{
+                Pattern = $trimmed
+                Negated = $negated
+            }
+        }
+    }
+
+    # Combine both sets in one list, .gitignore first, then AdditionalIgnore
+    # So AdditionalIgnore patterns have priority if they match last.
+    $allPatterns = $gitignorePatterns + $extraPatterns
+
+    # 2) Determine if a path should be ignored
+    function Should-Ignore {
+        param([string] $relativePath)
+
+        $ignored = $false
+        foreach ($rule in $allPatterns) {
+            $pattern = $rule.Pattern
+            $hasWildcard = $pattern -match '[\*\?]'
+
+            $match = $false
+
+            if ($hasWildcard) {
+                # If the pattern has wildcards, use -like
+                if ($relativePath -like $pattern) {
+                    $match = $true
+                }
+            }
+            else {
+                # No wildcard means "ignore exactly that name or any subpath"
+                # e.g. "target" => ignore "target" or "target/..."
+                if (
+                    $relativePath -eq $pattern -or
+                    ($relativePath -like "$pattern/*")
+                ) {
+                    $match = $true
+                }
+            }
+
+            if ($match) {
+                # The last match is authoritative
+                $ignored = -not $rule.Negated
+            }
+        }
+
+        return $ignored
+    }
+
+    # 3) Get all items recursively, filter out hidden & ignored
+    $allItems = Get-ChildItem -Path $Path -Recurse -Force |
+        Where-Object {
+            # Exclude items starting with '.' in the name
+            if ($_.Name.StartsWith('.')) {
+                return $false
+            }
+
+            # Exclude Windows-hidden items
+            if ([bool]($_.Attributes -band [IO.FileAttributes]::Hidden)) {
+                return $false
+            }
+
+            # Build relative path
+            $baseFullPath = (Resolve-Path $Path).ProviderPath
+            $itemFullPath = $_.FullName
+            $relativePath = $itemFullPath.Substring($baseFullPath.Length).TrimStart('\','/')
+            # Normalize directory separators
+            $relativePath = $relativePath -replace '\\','/'
+
+            # If Should-Ignore => ignore
+            if (Should-Ignore $relativePath) {
+                return $false
+            }
+
+            return $true
+        } |
+        Sort-Object -Property FullName
+
+    # 4) For each remaining file, print its content
+    $filesToShow = $allItems | Where-Object { -not $_.PSIsContainer }
+    foreach ($file in $filesToShow) {
+        $baseFullPath = (Resolve-Path $Path).ProviderPath
+        $itemFullPath = $file.FullName
+        $relativePath = $itemFullPath.Substring($baseFullPath.Length).TrimStart('\','/')
+        $relativePath = $relativePath -replace '\\','/'
+
+        Write-Host "$($relativePath):"
+        Write-Host (Get-Content $file.FullName -Raw)
+        Write-Host ""  # Blank line between files
     }
 }
 
