@@ -385,6 +385,9 @@ Includes files in the output in addition to folders. This is an optional switch 
 .PARAMETER RespectGitIgnore
 Respects `.gitignore` rules when listing files and directories. This is an optional switch parameter.
 
+.PARAMETER AdditionalIgnore
+An array of additional ignore patterns to apply.
+
 .EXAMPLE
 Show-DirectoryTree
 
@@ -411,39 +414,72 @@ This function uses recursion to traverse directories and outputs a tree-like str
 function Show-DirectoryTree {
     [CmdletBinding()]
     param(
-        [Parameter(Position = 0)]
+        [Parameter(Position = 0, HelpMessage = 'Path of the directory to list')]
         [string] $Path = '.',
-        [Parameter()]
-        [int]    $Depth = [int]::MaxValue,
+
+        [Parameter(HelpMessage = 'Maximum recursion depth (omit = unlimited)')]
+        [int] $Depth = [int]::MaxValue,
+
+        [Parameter(HelpMessage = 'Include files in addition to folders')]
         [switch] $IncludeFiles,
-        [switch] $RespectGitIgnore
+
+        [Parameter(HelpMessage = 'When listing files, omit those matching .gitignore or AdditionalIgnore')]
+        [switch] $RespectGitIgnore,
+
+        [Parameter(HelpMessage = 'Array of extra ignore patterns (in .gitignore syntax)')]
+        [string[]] $AdditionalIgnore = @()
     )
 
-    Write-Output $Path
+    # Print header (relative path)
+    Write-Output (Split-Path (Resolve-Path -LiteralPath $Path).ProviderPath -Leaf)
+
     $rootFull = (Resolve-Path -LiteralPath $Path).ProviderPath
 
+    # Prepare Convert-GitignoreLine helper
+    function Convert-GitignoreLine {
+        param([string] $line, [string] $baseDir)
+        $t = $line.Trim()
+        if ($t -match '^(#|\s*$)') { return }
+        $neg = $t.StartsWith('!'); if ($neg) { $t = $t.Substring(1).Trim() }
+        $anch = $t.StartsWith('/'); if ($anch) { $t = $t.Substring(1) }
+        $dirOnly = $t.EndsWith('/'); if ($dirOnly) { $t = $t.TrimEnd('/') }
+        [PSCustomObject]@{
+            Pattern  = $t
+            Negated  = $neg
+            Anchored = $anch
+            DirOnly  = $dirOnly
+            BaseDir  = $baseDir
+        }
+    }
+
+    # Build patterns array if needed
     if ($IncludeFiles.IsPresent -and $RespectGitIgnore.IsPresent) {
         $patterns = @()
-        function Convert-GitignoreLine {
-            param([string] $line, [string] $baseDir)
-            $t = $line.Trim()
-            if ($t -match '^(#|\s*$)') { return }
-            $neg = $t.StartsWith('!'); if ($neg) { $t = $t.Substring(1).Trim() }
-            $anch = $t.StartsWith('/'); if ($anch) { $t = $t.Substring(1) }
-            $dirOnly = $t.EndsWith('/'); if ($dirOnly) { $t = $t.TrimEnd('/') }
-            [PSCustomObject]@{ Pattern = $t; Negated = $neg; Anchored = $anch; DirOnly = $dirOnly; BaseDir = $baseDir }
+
+        # 1) AdditionalIgnore entries (base is root)
+        foreach ($pat in $AdditionalIgnore) {
+            if ($p = Convert-GitignoreLine $pat $rootFull) {
+                $patterns += $p
+            }
         }
+
+        # 2) All .gitignore under tree
         Get-ChildItem -Path $rootFull -Filter '.gitignore' -File -Recurse -Force |
         ForEach-Object {
             $dir = Split-Path $_.FullName -Parent
-            Get-Content -LiteralPath $_.FullName |
-            ForEach-Object { if ($p = Convert-GitignoreLine $_ $dir) { $patterns += $p } }
+            Get-Content -LiteralPath $_.FullName | ForEach-Object {
+                if ($p = Convert-GitignoreLine $_ $dir) {
+                    $patterns += $p
+                }
+            }
         }
+
+        # testIgnore uses combined patterns
         $testIgnore = {
             param($fullPath, $isDir)
             foreach ($r in $patterns) {
                 if ($fullPath -notlike "$($r.BaseDir)*") { continue }
-                $rel = $fullPath.Substring($r.BaseDir.Length).TrimStart('\', '/').Replace('\', '/')
+                $rel = $fullPath.Substring($r.BaseDir.Length).TrimStart('\','/').Replace('\','/')
                 if ($r.DirOnly -and -not $isDir) { continue }
                 $match = $false
                 if ($r.Anchored) {
@@ -462,31 +498,43 @@ function Show-DirectoryTree {
         }
     }
     else {
+        # never ignore
         $testIgnore = { return $false }
     }
 
+    # Recursive walker
     function Walk {
-        param($dir, $prefix, $level)
+        param(
+            [string] $dir,
+            [string] $prefix,
+            [int]    $level
+        )
         if ($level -ge $Depth) { return }
 
         $items = Get-ChildItem -LiteralPath $dir -Force |
-        Where-Object { -not ($_.Name.StartsWith('.') -or ($_.Attributes -band [IO.FileAttributes]::Hidden)) }
+                 Where-Object { -not ($_.Name.StartsWith('.') -or ($_.Attributes -band [IO.FileAttributes]::Hidden)) }
 
-        $dirs = $items | Where-Object { $_.PSIsContainer -and -not (& $testIgnore $_.FullName $true) } | Sort-Object Name
+        $dirs = $items |
+                Where-Object { $_.PSIsContainer -and -not (& $testIgnore $_.FullName $true) } |
+                Sort-Object Name
+
         $files = if ($IncludeFiles) {
-            $items | Where-Object { -not $_.PSIsContainer -and -not (& $testIgnore $_.FullName $false) } | Sort-Object Name
-        }
-        else { @() }
+                    $items |
+                    Where-Object { -not $_.PSIsContainer -and -not (& $testIgnore $_.FullName $false) } |
+                    Sort-Object Name
+                 }
+                 else { @() }
 
-        # FORZAR arrays
-        $dirs = @($dirs)
+        # Force arrays
+        $dirs  = @($dirs)
         $files = @($files)
         $entries = $dirs + $files
 
         for ($i = 0; $i -lt $entries.Count; $i++) {
-            $item = $entries[$i]
+            $item   = $entries[$i]
             $isLast = ($i -eq $entries.Count - 1)
             $branch = if ($isLast) { '└── ' } else { '├── ' }
+
             Write-Output ($prefix + $branch + $item.Name)
 
             if ($item.PSIsContainer) {
@@ -496,8 +544,10 @@ function Show-DirectoryTree {
         }
     }
 
+    # Start walking
     Walk -dir $rootFull -prefix '' -level 0
 }
+
 
 
 
