@@ -371,16 +371,19 @@ Displays a directory tree structure in the console.
 
 .DESCRIPTION
 The `Show-DirectoryTree` function recursively lists the contents of a directory in a tree-like format. 
-It can display both folders and files, and allows customization of the recursion depth.
+It supports displaying both folders and files, with options to customize recursion depth and respect `.gitignore` rules.
 
 .PARAMETER Path
-Specifies the path of the directory to list. Defaults to the current directory ('.').
+Specifies the path of the directory to list. Defaults to the current directory (`.`).
 
 .PARAMETER Depth
-Specifies the maximum depth of recursion. Defaults to unlimited depth ([int]::MaxValue).
+Specifies the maximum depth of recursion. Defaults to unlimited depth (`[int]::MaxValue`).
 
 .PARAMETER IncludeFiles
 Includes files in the output in addition to folders. This is an optional switch parameter.
+
+.PARAMETER RespectGitIgnore
+Respects `.gitignore` rules when listing files and directories. This is an optional switch parameter.
 
 .EXAMPLE
 Show-DirectoryTree
@@ -397,192 +400,346 @@ Show-DirectoryTree -Path "C:\Projects" -IncludeFiles
 
 Displays the directory tree of "C:\Projects", including files.
 
-.NOTES
-Author: [Your Name]
-Date: [Date]
-This function uses recursion to traverse directories and outputs a tree-like structure with proper indentation.
+.EXAMPLE
+Show-DirectoryTree -Path "C:\Projects" -IncludeFiles -RespectGitIgnore
 
+Displays the directory tree of "C:\Projects", including files, while respecting `.gitignore` rules.
+
+.NOTES
+This function uses recursion to traverse directories and outputs a tree-like structure with proper indentation.
 #>
 function Show-DirectoryTree {
     [CmdletBinding()]
     param(
-        [Parameter(Position = 0, HelpMessage = 'Path of the directory to list')]
-        [string]$Path = '.',
-
-        [Parameter(HelpMessage = 'Maximum recursion depth (omit = unlimited)')]
-        [int]$Depth = [int]::MaxValue,
-
-        [Parameter(HelpMessage = 'Include files in addition to folders')]
-        [switch]$IncludeFiles
+        [Parameter(Position = 0)]
+        [string] $Path = '.',
+        [Parameter()]
+        [int]    $Depth = [int]::MaxValue,
+        [switch] $IncludeFiles,
+        [switch] $RespectGitIgnore
     )
 
-    # Resolve the base path and print its name
-    $baseFull = (Resolve-Path -LiteralPath $Path).ProviderPath
-    Write-Host $baseFull
+    Write-Output $Path
+    $rootFull = (Resolve-Path -LiteralPath $Path).ProviderPath
 
-    function Traverse {
-        param(
-            [string]$CurrentPath,
-            [string]$Indent,
-            [int]$Level
-        )
+    if ($IncludeFiles.IsPresent -and $RespectGitIgnore.IsPresent) {
+        $patterns = @()
+        function Convert-GitignoreLine {
+            param([string] $line, [string] $baseDir)
+            $t = $line.Trim()
+            if ($t -match '^(#|\s*$)') { return }
+            $neg = $t.StartsWith('!'); if ($neg) { $t = $t.Substring(1).Trim() }
+            $anch = $t.StartsWith('/'); if ($anch) { $t = $t.Substring(1) }
+            $dirOnly = $t.EndsWith('/'); if ($dirOnly) { $t = $t.TrimEnd('/') }
+            [PSCustomObject]@{ Pattern = $t; Negated = $neg; Anchored = $anch; DirOnly = $dirOnly; BaseDir = $baseDir }
+        }
+        Get-ChildItem -Path $rootFull -Filter '.gitignore' -File -Recurse -Force |
+        ForEach-Object {
+            $dir = Split-Path $_.FullName -Parent
+            Get-Content -LiteralPath $_.FullName |
+            ForEach-Object { if ($p = Convert-GitignoreLine $_ $dir) { $patterns += $p } }
+        }
+        $testIgnore = {
+            param($fullPath, $isDir)
+            foreach ($r in $patterns) {
+                if ($fullPath -notlike "$($r.BaseDir)*") { continue }
+                $rel = $fullPath.Substring($r.BaseDir.Length).TrimStart('\', '/').Replace('\', '/')
+                if ($r.DirOnly -and -not $isDir) { continue }
+                $match = $false
+                if ($r.Anchored) {
+                    if ($rel -like $r.Pattern -or $rel -like "$($r.Pattern)/*") { $match = $true }
+                }
+                elseif ($r.Pattern.Contains('/')) {
+                    if ($rel -like "*$($r.Pattern)*") { $match = $true }
+                }
+                else {
+                    $leaf = if ($rel) { Split-Path $rel -Leaf } else { '' }
+                    if ($leaf -like $r.Pattern) { $match = $true }
+                }
+                if ($match) { return (-not $r.Negated) }
+            }
+            return $false
+        }
+    }
+    else {
+        $testIgnore = { return $false }
+    }
 
-        if ($Level -gt $Depth) { return }
+    function Walk {
+        param($dir, $prefix, $level)
+        if ($level -ge $Depth) { return }
 
-        # Get folders first and then files (if requested)
-        $items = Get-ChildItem -LiteralPath $CurrentPath -Force |
-        Where-Object { $_.PSIsContainer -or $IncludeFiles } |
-        Sort-Object @{Expression = { -not $_.PSIsContainer } }, Name
+        $items = Get-ChildItem -LiteralPath $dir -Force |
+        Where-Object { -not ($_.Name.StartsWith('.') -or ($_.Attributes -band [IO.FileAttributes]::Hidden)) }
 
-        for ($i = 0; $i -lt $items.Count; $i++) {
-            $item = $items[$i]
-            $isLast = ($i -eq $items.Count - 1)
+        $dirs = $items | Where-Object { $_.PSIsContainer -and -not (& $testIgnore $_.FullName $true) } | Sort-Object Name
+        $files = if ($IncludeFiles) {
+            $items | Where-Object { -not $_.PSIsContainer -and -not (& $testIgnore $_.FullName $false) } | Sort-Object Name
+        }
+        else { @() }
 
-            # Choose the branch ├── or └──
+        # FORZAR arrays
+        $dirs = @($dirs)
+        $files = @($files)
+        $entries = $dirs + $files
+
+        for ($i = 0; $i -lt $entries.Count; $i++) {
+            $item = $entries[$i]
+            $isLast = ($i -eq $entries.Count - 1)
             $branch = if ($isLast) { '└── ' } else { '├── ' }
-            Write-Host "$Indent$branch$item.Name"
+            Write-Output ($prefix + $branch + $item.Name)
 
-            # If it's a folder, recurse increasing indentation
             if ($item.PSIsContainer) {
-                $newIndent = if ($isLast) { "$Indent    " } else { "$Indent│   " }
-                Traverse -CurrentPath $item.FullName -Indent $newIndent -Level ($Level + 1)
+                $newPrefix = if ($isLast) { "$prefix    " } else { "$prefix│   " }
+                Walk -dir $item.FullName -prefix $newPrefix -level ($level + 1)
             }
         }
     }
 
-    # Start recursion
-    Traverse -CurrentPath $baseFull -Indent '' -Level 1
+    Walk -dir $rootFull -prefix '' -level 0
 }
+
 
 
 <#
 .SYNOPSIS
-Recursively retrieves the content of files in a directory while ignoring files and directories based on .gitignore rules and additional ignore patterns.
+Recursively retrieves the content of files in a directory while respecting .gitignore rules and additional ignore patterns.
 
 .DESCRIPTION
-The `Get-ContentRecursiveIgnore` function traverses a directory structure, applying ignore rules specified in a `.gitignore` file and any additional patterns provided via the `AdditionalIgnore` parameter. It collects the content of non-ignored files and returns it as a single string, with each file's content prefixed by its relative path.
+The `Get-ContentRecursiveIgnore` function enumerates files in a specified directory and its subdirectories, ignoring files and directories based on .gitignore rules and additional ignore patterns provided by the user. It outputs the content of the files, optionally formatted with Markdown fenced code blocks.
 
 .PARAMETER Path
-Specifies the root directory to start the recursive traversal. Defaults to the current directory (`"."`).
+Specifies the root directory to start the recursive enumeration. Defaults to the current directory (".").
 
 .PARAMETER AdditionalIgnore
-Specifies additional ignore patterns to apply, in addition to those defined in the `.gitignore` file. These patterns follow the same syntax as `.gitignore`.
+An array of additional ignore patterns to apply, in addition to the patterns specified in .gitignore files.
+
+.PARAMETER UseMarkdownFence
+A boolean flag indicating whether to format the output with Markdown fenced code blocks. Defaults to `$true`.
 
 .EXAMPLE
-Get-ContentRecursiveIgnore -Path "C:\MyProject"
-
-Recursively retrieves the content of all non-ignored files in the `C:\MyProject` directory, applying ignore rules from the `.gitignore` file in that directory.
+Get-ContentRecursiveIgnore -Path "C:\Projects" -AdditionalIgnore @("*.log", "!important.log") -UseMarkdownFence $false
+Retrieves the content of all files in the "C:\Projects" directory and its subdirectories, ignoring files matching the patterns in .gitignore and the additional patterns "*.log" (except "important.log"). Outputs the content without Markdown formatting.
 
 .EXAMPLE
-Get-ContentRecursiveIgnore -Path "C:\MyProject" -AdditionalIgnore @("*.log", "temp/")
-
-Recursively retrieves the content of all non-ignored files in the `C:\MyProject` directory, applying ignore rules from the `.gitignore` file and additional rules to ignore `.log` files and the `temp/` directory.
+Get-ContentRecursiveIgnore -Path "C:\Projects" -UseMarkdownFence $true
+Retrieves the content of all files in the "C:\Projects" directory and its subdirectories, ignoring files matching the patterns in .gitignore. Outputs the content formatted with Markdown fenced code blocks.
 
 .NOTES
-- The function manually traverses directories to avoid processing hidden files and directories (e.g., `.git`).
-- Ignore rules are evaluated in the order they appear, with later rules overriding earlier ones.
-- Files that cannot be read (e.g., due to permissions) are silently skipped.
+- The function respects .gitignore rules found in the directory tree.
+- Additional ignore patterns can be specified using the `AdditionalIgnore` parameter.
+- The function supports syntax highlighting for various file types when `UseMarkdownFence` is enabled, based on file extensions.
 
 #> 
 function Get-ContentRecursiveIgnore {
     [CmdletBinding()]
     param(
-        [string]$Path = ".",
-        [string[]]$AdditionalIgnore = @()
+        [string]   $Path = ".",
+        [string[]] $AdditionalIgnore = @(),
+        [bool]     $UseMarkdownFence = $true
     )
 
-    # Leer .gitignore
-    $gitignoreFile = Join-Path $Path ".gitignore"
-    $rawGitignoreLines = if (Test-Path $gitignoreFile) { Get-Content $gitignoreFile } else { @() }
+    #
+    # Build a case‑insensitive extension → Markdown language map
+    #
+    $extensionMap = [hashtable]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $literalMap = @{
+        # PowerShell
+        ps1        = 'powershell'
+        psm1       = 'powershell'
+        psd1       = 'powershell'
+        # Python
+        py         = 'python'
+        pyw        = 'python'
+        # JavaScript
+        js         = 'javascript'
+        mjs        = 'javascript'
+        cjs        = 'javascript'
+        jsx        = 'javascript'
+        # TypeScript
+        ts         = 'typescript'
+        tsx        = 'typescript'
+        # HTML / XML
+        html       = 'html'
+        htm        = 'html'
+        xml        = 'xml'
+        xaml       = 'xml'
+        # CSS / preprocessors
+        css        = 'css'
+        scss       = 'scss'
+        sass       = 'scss'
+        less       = 'less'
+        # JSON / data files
+        json       = 'json'
+        toml       = 'toml'
+        ini        = 'ini'
+        yaml       = 'yaml'
+        yml        = 'yaml'
+        csv        = 'csv'
+        # Markdown
+        md         = 'markdown'
+        markdown   = 'markdown'
+        # Shell scripts
+        sh         = 'bash'
+        bash       = 'bash'
+        zsh        = 'bash'
+        ksh        = 'bash'
+        fish       = 'bash'
+        # C family
+        c          = 'c'
+        h          = 'c'
+        cpp        = 'cpp'
+        cc         = 'cpp'
+        cxx        = 'cpp'
+        hh         = 'cpp'
+        hpp        = 'cpp'
+        # C#
+        cs         = 'csharp'
+        # Java
+        java       = 'java'
+        # Go
+        go         = 'go'
+        # PHP
+        php        = 'php'
+        # Ruby
+        rb         = 'ruby'
+        erb        = 'ruby'
+        # Rust
+        rs         = 'rust'
+        # Kotlin
+        kt         = 'kotlin'
+        kts        = 'kotlin'
+        # Swift
+        swift      = 'swift'
+        # Dart
+        dart       = 'dart'
+        # Scala
+        scala      = 'scala'
+        # SQL
+        sql        = 'sql'
+        # Elm
+        elm        = 'elm'
+        # Erlang
+        erl        = 'erlang'
+        # R
+        r          = 'r'
+        # MATLAB / Octave
+        m          = 'matlab'
+        # LaTeX
+        tex        = 'latex'
+        # GraphQL
+        gql        = 'graphql'
+        # Dockerfile (special case, filename based)
+        dockerfile = 'dockerfile'
+    }
+    foreach ($entry in $literalMap.GetEnumerator()) {
+        $extensionMap[$entry.Key] = $entry.Value
+    }
 
-    # Convierte cada línea en una regla
+    #
+    # Parse a .gitignore line into a pattern object
+    #
     function Convert-GitignoreLine {
-        param([string]$line)
-        $trim = $line.Trim()
-        if ($trim -match '^(#|\s*$)') { return $null }
-        $neg = $false; if ($trim.StartsWith('!')) { $neg = $true; $trim = $trim.Substring(1).Trim() }
-        $anch = $false; if ($trim.StartsWith('/')) { $anch = $true; $trim = $trim.Substring(1) }
-        $dirOnly = $false; if ($trim.EndsWith('/')) { $dirOnly = $true; $trim = $trim.TrimEnd('/') }
-        return [pscustomobject]@{ Pattern = $trim; Negated = $neg; Anchored = $anch; DirOnly = $dirOnly }
-    }
-
-    $gitignorePatterns = $rawGitignoreLines | ForEach-Object { Convert-GitignoreLine $_ } | Where-Object { $_ }
-    $extraPatterns = $AdditionalIgnore | ForEach-Object { Convert-GitignoreLine $_ } | Where-Object { $_ }
-    $allPatterns = $gitignorePatterns + $extraPatterns
-
-    # Evalúa si se debe ignorar
-    function Test-Ignore {
-        param([string]$rel)
-        $ignored = $false
-        foreach ($r in $allPatterns) {
-            if ($r.DirOnly -and -not ($rel -like "$($r.Pattern)/*")) { continue }
-            $match = $false
-            if ($r.Anchored) {
-                $match = $rel -like $r.Pattern -or $rel -like "$($r.Pattern)/*"
-            }
-            elseif ($r.Pattern.Contains('/')) {
-                $match = $rel -like "*$($r.Pattern)*"
-            }
-            else {
-                $leaf = Split-Path $rel -Leaf
-                $match = $leaf -like $r.Pattern
-            }
-            if ($match) {
-                $ignored = -not $r.Negated
-            }
+        param([string] $line, [string] $baseDir)
+        $text = $line.Trim()
+        if ($text -match '^(#|\s*$)') { return }
+        $negated = $text.StartsWith('!')
+        if ($negated) { $text = $text.Substring(1).Trim() }
+        $anchored = $text.StartsWith('/')
+        if ($anchored) { $text = $text.Substring(1) }
+        $dirOnly = $text.EndsWith('/')
+        if ($dirOnly) { $text = $text.TrimEnd('/') }
+        return [PSCustomObject]@{
+            Pattern  = $text
+            Negated  = $negated
+            Anchored = $anchored
+            DirOnly  = $dirOnly
+            BaseDir  = $baseDir
         }
-        return $ignored
     }
 
-    # Recorre directorios manualmente evitando .git y aplicando reglas
-    function Enumerate {
-        param([string]$dir, [string]$base)
+    #
+    # Load ignore patterns from .gitignore files
+    #
+    $baseFull = (Resolve-Path $Path).ProviderPath
+    $patterns = @()
+    foreach ($ignore in $AdditionalIgnore) {
+        if ($p = Convert-GitignoreLine $ignore $baseFull) { $patterns += $p }
+    }
+    Get-ChildItem -Path $baseFull -Filter '.gitignore' -File -Recurse -Force | ForEach-Object {
+        $dir = Split-Path $_.FullName -Parent
+        Get-Content $_.FullName | ForEach-Object {
+            if ($p = Convert-GitignoreLine $_ $dir) { $patterns += $p }
+        }
+    }
 
-        $items = Get-ChildItem $dir -Force
-        foreach ($item in $items) {
-            $rel = $item.FullName.Substring($base.Length).TrimStart('\', '/') -replace '\\', '/'
-
-            if ($item.PSIsContainer) {
-                if ($item.Name -like '.*') { continue }
-                if ($item.Attributes -band [IO.FileAttributes]::Hidden) { continue }
-                if (Test-Ignore $rel) { continue }
-
-                # Recursión
-                Enumerate -dir $item.FullName -base $base
+    #
+    # Scriptblock to test whether a path should be ignored
+    #
+    $testIgnore = {
+        param([string] $fullPath, [bool] $isDirectory)
+        foreach ($rule in $patterns) {
+            if ($fullPath -notlike "$($rule.BaseDir)*") { continue }
+            $relative = $fullPath.Substring($rule.BaseDir.Length).TrimStart('\', '/').Replace('\', '/')
+            if ($rule.DirOnly -and -not $isDirectory) { continue }
+            $matched = $false
+            if ($rule.Anchored) {
+                if ($relative -like "$($rule.Pattern)" -or $relative -like "$($rule.Pattern)/*") { $matched = $true }
+            }
+            elseif ($rule.Pattern.Contains('/')) {
+                if ($relative -like "*$($rule.Pattern)*") { $matched = $true }
             }
             else {
-                if ($item.Name -like '.*') { continue }
-                if ($item.Attributes -band [IO.FileAttributes]::Hidden) { continue }
-                if (Test-Ignore $rel) { continue }
+                $leaf = if ($relative) { Split-Path $relative -Leaf } else { "" }
+                if ($leaf -like $rule.Pattern) { $matched = $true }
+            }
+            if ($matched) { return -not $rule.Negated }
+        }
+        return $false
+    }
 
-                # Acumular archivo válido
-                $script:collectedFiles += , @{
-                    Path = $item.FullName
-                    Rel  = $rel
+    #
+    # Recursively enumerate files that are not ignored
+    #
+    function Enumerate {
+        param([string] $directory)
+        Get-ChildItem -Path $directory -Force | ForEach-Object {
+            if ($_.Name.StartsWith('.') -or ($_.Attributes -band [IO.FileAttributes]::Hidden)) { return }
+            if (& $testIgnore $_.FullName $_.PSIsContainer) { return }
+            if ($_.PSIsContainer) {
+                Enumerate $_.FullName
+            }
+            else {
+                [PSCustomObject]@{
+                    FullPath = $_.FullName
+                    RelPath  = $_.FullName.Substring($baseFull.Length).TrimStart('\', '/').Replace('\', '/')
                 }
             }
         }
     }
 
-    $baseFull = (Resolve-Path $Path).ProviderPath
-    $script:collectedFiles = @()
-    Enumerate -dir $baseFull -base $baseFull
+    #
+    # Generate output with fenced code blocks
+    #
+    $files = Enumerate $baseFull
+    $output = $files | Sort-Object FullPath | ForEach-Object {
+        $relPath = $_.RelPath
+        $ext = [IO.Path]::GetExtension($_.FullPath).TrimStart('.')
+        $lang = if ($extensionMap.ContainsKey($ext)) { $extensionMap[$ext] } else { '' }
+        $openFence = '```' + $lang
+        $closeFence = '```'
+        $content = Get-Content -Raw -LiteralPath $_.FullPath
 
-    # Construir resultado
-    $parts = foreach ($f in $collectedFiles | Sort-Object { $_.Path }) {
-        try {
-            $content = Get-Content -Path $f.Path -Raw
-            "$($f.Rel):`n$content`n"
+        if ($UseMarkdownFence) {
+            "$relPath`n$openFence`n$content`n$closeFence"
         }
-        catch {
-            # Ignorar archivos que no se puedan leer
-            ""
+        else {
+            "$relPath`n$content"
         }
     }
 
-    return ($parts -join "`n")
+    return ($output -join "`n`n")
 }
-
 
 # Aliases
 Set-Alias -Name vim -Value nvim
