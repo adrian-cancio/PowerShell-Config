@@ -19,7 +19,7 @@ $Global:DefaultSettings = [ordered]@{
 # ----------------------------------
 # 3) Function to Load User Settings
 # ----------------------------------
-function Load-UserSettings {
+function Get-UserSettings {
     param(
         [string]$Path = $Global:SettingsFile
     )
@@ -72,7 +72,7 @@ function Load-UserSettings {
 # ----------------------------------
 # 4) Load settings into a global variable
 # ----------------------------------
-$Global:UserSettings = Load-UserSettings $Global:SettingsFile
+$Global:UserSettings = Get-UserSettings $Global:SettingsFile
 
 # ----------------------------------
 # 5) Functions to Save User Settings (optional)
@@ -367,45 +367,123 @@ function Stop-ProcessConstantly {
 
 <#
 .SYNOPSIS
-    Recursively collect content from non‐ignored files and return it as one multiline string.
+Displays a directory tree structure in the console.
 
 .DESCRIPTION
-    1) Gathers all items (files and directories) recursively under the specified path.
-    2) Filters out:
-       - Entries whose name starts with a '.'.
-       - Items marked Hidden (Windows).
-       - Entries matching .gitignore (approximate Git rules).
-       - Entries matching any AdditionalIgnore patterns.
-    3) For each remaining file, reads its full content, prefixes it with its relative path and a colon, then appends it to an accumulating string.
-    4) Returns the complete concatenated string of "relative/path:␤<file contents>␤␤…".
+The `Show-DirectoryTree` function recursively lists the contents of a directory in a tree-like format. 
+It can display both folders and files, and allows customization of the recursion depth.
 
 .PARAMETER Path
-    The base directory to scan. Defaults to the current directory (".").
+Specifies the path of the directory to list. Defaults to the current directory ('.').
 
-.PARAMETER AdditionalIgnore
-    An array of extra wildcard ignore patterns (e.g. "*.log", "node_modules/*"). These are applied after .gitignore rules; last match wins.
+.PARAMETER Depth
+Specifies the maximum depth of recursion. Defaults to unlimited depth ([int]::MaxValue).
 
-.OUTPUTS
-    [string]
-    A single multiline string containing each file’s relative path and its contents.
-
-.EXAMPLE
-    $allContent = Get-ContentRecursiveIgnore -Path "C:\MyProject"
-    # $allContent now holds one big string with each file’s path and contents.
+.PARAMETER IncludeFiles
+Includes files in the output in addition to folders. This is an optional switch parameter.
 
 .EXAMPLE
-    Get-ContentRecursiveIgnore -AdditionalIgnore @("*.log", "temp/*")
+Show-DirectoryTree
 
-    Same as above, but also ignores any .log files and anything under a folder named 'temp'.
+Displays the directory tree of the current directory.
+
+.EXAMPLE
+Show-DirectoryTree -Path "C:\Projects" -Depth 2
+
+Displays the directory tree of "C:\Projects" up to a depth of 2 levels.
+
+.EXAMPLE
+Show-DirectoryTree -Path "C:\Projects" -IncludeFiles
+
+Displays the directory tree of "C:\Projects", including files.
 
 .NOTES
-    This script does not fully replicate Git’s behavior.
-    However, it handles core use cases:
-      - Patterns without wildcards match both the exact path and its subpaths ("dir" => "dir" or "dir/subfile").
-      - Patterns with wildcards (* or ?) use PowerShell’s -like.
-      - Lines starting with '!' act as negation (unignore).
-      - Leading '/' means 'from the root'; we drop it, but keep in mind Git has more nuanced anchoring rules.
+Author: [Your Name]
+Date: [Date]
+This function uses recursion to traverse directories and outputs a tree-like structure with proper indentation.
+
 #>
+function Show-DirectoryTree {
+    [CmdletBinding()]
+    param(
+        [Parameter(Position = 0, HelpMessage = 'Path of the directory to list')]
+        [string]$Path = '.',
+
+        [Parameter(HelpMessage = 'Maximum recursion depth (omit = unlimited)')]
+        [int]$Depth = [int]::MaxValue,
+
+        [Parameter(HelpMessage = 'Include files in addition to folders')]
+        [switch]$IncludeFiles
+    )
+
+    # Resolve the base path and print its name
+    $baseFull = (Resolve-Path -LiteralPath $Path).ProviderPath
+    Write-Host $baseFull
+
+    function Traverse {
+        param(
+            [string]$CurrentPath,
+            [string]$Indent,
+            [int]$Level
+        )
+
+        if ($Level -gt $Depth) { return }
+
+        # Get folders first and then files (if requested)
+        $items = Get-ChildItem -LiteralPath $CurrentPath -Force |
+        Where-Object { $_.PSIsContainer -or $IncludeFiles } |
+        Sort-Object @{Expression = { -not $_.PSIsContainer } }, Name
+
+        for ($i = 0; $i -lt $items.Count; $i++) {
+            $item = $items[$i]
+            $isLast = ($i -eq $items.Count - 1)
+
+            # Choose the branch ├── or └──
+            $branch = if ($isLast) { '└── ' } else { '├── ' }
+            Write-Host "$Indent$branch$item.Name"
+
+            # If it's a folder, recurse increasing indentation
+            if ($item.PSIsContainer) {
+                $newIndent = if ($isLast) { "$Indent    " } else { "$Indent│   " }
+                Traverse -CurrentPath $item.FullName -Indent $newIndent -Level ($Level + 1)
+            }
+        }
+    }
+
+    # Start recursion
+    Traverse -CurrentPath $baseFull -Indent '' -Level 1
+}
+
+
+<#
+.SYNOPSIS
+Recursively retrieves the content of files in a directory while ignoring files and directories based on .gitignore rules and additional ignore patterns.
+
+.DESCRIPTION
+The `Get-ContentRecursiveIgnore` function traverses a directory structure, applying ignore rules specified in a `.gitignore` file and any additional patterns provided via the `AdditionalIgnore` parameter. It collects the content of non-ignored files and returns it as a single string, with each file's content prefixed by its relative path.
+
+.PARAMETER Path
+Specifies the root directory to start the recursive traversal. Defaults to the current directory (`"."`).
+
+.PARAMETER AdditionalIgnore
+Specifies additional ignore patterns to apply, in addition to those defined in the `.gitignore` file. These patterns follow the same syntax as `.gitignore`.
+
+.EXAMPLE
+Get-ContentRecursiveIgnore -Path "C:\MyProject"
+
+Recursively retrieves the content of all non-ignored files in the `C:\MyProject` directory, applying ignore rules from the `.gitignore` file in that directory.
+
+.EXAMPLE
+Get-ContentRecursiveIgnore -Path "C:\MyProject" -AdditionalIgnore @("*.log", "temp/")
+
+Recursively retrieves the content of all non-ignored files in the `C:\MyProject` directory, applying ignore rules from the `.gitignore` file and additional rules to ignore `.log` files and the `temp/` directory.
+
+.NOTES
+- The function manually traverses directories to avoid processing hidden files and directories (e.g., `.git`).
+- Ignore rules are evaluated in the order they appear, with later rules overriding earlier ones.
+- Files that cannot be read (e.g., due to permissions) are silently skipped.
+
+#> 
 function Get-ContentRecursiveIgnore {
     [CmdletBinding()]
     param(
@@ -425,7 +503,7 @@ function Get-ContentRecursiveIgnore {
         $neg = $false; if ($trim.StartsWith('!')) { $neg = $true; $trim = $trim.Substring(1).Trim() }
         $anch = $false; if ($trim.StartsWith('/')) { $anch = $true; $trim = $trim.Substring(1) }
         $dirOnly = $false; if ($trim.EndsWith('/')) { $dirOnly = $true; $trim = $trim.TrimEnd('/') }
-        return [pscustomobject]@{ Pattern=$trim; Negated=$neg; Anchored=$anch; DirOnly=$dirOnly }
+        return [pscustomobject]@{ Pattern = $trim; Negated = $neg; Anchored = $anch; DirOnly = $dirOnly }
     }
 
     $gitignorePatterns = $rawGitignoreLines | ForEach-Object { Convert-GitignoreLine $_ } | Where-Object { $_ }
@@ -433,7 +511,7 @@ function Get-ContentRecursiveIgnore {
     $allPatterns = $gitignorePatterns + $extraPatterns
 
     # Evalúa si se debe ignorar
-    function Should-Ignore {
+    function Test-Ignore {
         param([string]$rel)
         $ignored = $false
         foreach ($r in $allPatterns) {
@@ -462,12 +540,12 @@ function Get-ContentRecursiveIgnore {
 
         $items = Get-ChildItem $dir -Force
         foreach ($item in $items) {
-            $rel = $item.FullName.Substring($base.Length).TrimStart('\','/') -replace '\\','/'
+            $rel = $item.FullName.Substring($base.Length).TrimStart('\', '/') -replace '\\', '/'
 
             if ($item.PSIsContainer) {
                 if ($item.Name -like '.*') { continue }
                 if ($item.Attributes -band [IO.FileAttributes]::Hidden) { continue }
-                if (Should-Ignore $rel) { continue }
+                if (Test-Ignore $rel) { continue }
 
                 # Recursión
                 Enumerate -dir $item.FullName -base $base
@@ -475,12 +553,12 @@ function Get-ContentRecursiveIgnore {
             else {
                 if ($item.Name -like '.*') { continue }
                 if ($item.Attributes -band [IO.FileAttributes]::Hidden) { continue }
-                if (Should-Ignore $rel) { continue }
+                if (Test-Ignore $rel) { continue }
 
                 # Acumular archivo válido
-                $script:collectedFiles += ,@{
+                $script:collectedFiles += , @{
                     Path = $item.FullName
-                    Rel = $rel
+                    Rel  = $rel
                 }
             }
         }
@@ -512,6 +590,7 @@ Set-Alias -Name vi -Value vim
 Set-Alias -Name gvim -Value vim
 Set-Alias -Name wrh -Value Write-Host
 Set-Alias -Name cpwd -Value Set-PWDClipboard
+Set-Alias -Name tree -Value Show-DirectoryTree
 
 # Copilot aliases
 function ghcs {
