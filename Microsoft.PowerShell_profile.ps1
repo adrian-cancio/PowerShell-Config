@@ -367,31 +367,31 @@ function Stop-ProcessConstantly {
 
 <#
 .SYNOPSIS
-    Recursively get content from non-ignored files, respecting .gitignore and optionally additional ignore patterns.
+    Recursively collect content from non‐ignored files and return it as one multiline string.
 
 .DESCRIPTION
-    This function:
-    1) Gathers all items (files and directories) recursively from the specified path.
+    1) Gathers all items (files and directories) recursively under the specified path.
     2) Filters out:
-       - Items whose name starts with a period (e.g. .git, .hidden).
-       - Items with the Hidden attribute (Windows).
-       - Items ignored by .gitignore (with approximate Git semantics).
-       - Items matching any additional user-specified ignore patterns.
-    3) Prints the content of remaining (not ignored) files, preceded by their relative path.
+       - Entries whose name starts with a '.'.
+       - Items marked Hidden (Windows).
+       - Entries matching .gitignore (approximate Git rules).
+       - Entries matching any AdditionalIgnore patterns.
+    3) For each remaining file, reads its full content, prefixes it with its relative path and a colon, then appends it to an accumulating string.
+    4) Returns the complete concatenated string of "relative/path:␤<file contents>␤␤…".
 
 .PARAMETER Path
-    The root directory to scan. Defaults to the current directory (".").
+    The base directory to scan. Defaults to the current directory (".").
 
 .PARAMETER AdditionalIgnore
-    An array of extra ignore patterns in PowerShell wildcard style (e.g. "*.log", "node_modules", "dist/*").
-    These are applied after .gitignore patterns and have the same precedence rules (last match wins).
-    If you pass a pattern here, any file/folder matching it will be ignored.
+    An array of extra wildcard ignore patterns (e.g. "*.log", "node_modules/*"). These are applied after .gitignore rules; last match wins.
+
+.OUTPUTS
+    [string]
+    A single multiline string containing each file’s relative path and its contents.
 
 .EXAMPLE
-    Get-ContentRecursiveIgnore -Path "C:\MyProject"
-
-    Recursively scans C:\MyProject, respecting .gitignore and ignoring hidden items.
-    Prints the content of each non-ignored file.
+    $allContent = Get-ContentRecursiveIgnore -Path "C:\MyProject"
+    # $allContent now holds one big string with each file’s path and contents.
 
 .EXAMPLE
     Get-ContentRecursiveIgnore -AdditionalIgnore @("*.log", "temp/*")
@@ -409,156 +409,102 @@ function Stop-ProcessConstantly {
 function Get-ContentRecursiveIgnore {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$false)]
         [string]$Path = ".",
-
-        [Parameter(Mandatory=$false)]
         [string[]]$AdditionalIgnore = @()
     )
 
-    # 1) Read .gitignore (if present) to build a list of patterns
+    # Leer .gitignore
     $gitignoreFile = Join-Path $Path ".gitignore"
-    $rawGitignoreLines = @()
-    if (Test-Path $gitignoreFile) {
-        $rawGitignoreLines = Get-Content $gitignoreFile -ErrorAction SilentlyContinue
-    }
+    $rawGitignoreLines = if (Test-Path $gitignoreFile) { Get-Content $gitignoreFile } else { @() }
 
-    # Convert .gitignore lines to an object with {Pattern, Negated} fields
+    # Convierte cada línea en una regla
     function Convert-GitignoreLine {
-        param([string] $line)
-
-        $trimmed = $line.Trim()
-        # Skip empty lines or comments
-        if ($trimmed -match '^(#|\s*$)') {
-            return $null
-        }
-
-        $negated = $false
-        if ($trimmed.StartsWith('!')) {
-            $negated = $true
-            $trimmed = $trimmed.Substring(1).Trim()
-        }
-        # If starts with '/', remove it (Git => anchored, we do approximate logic)
-        if ($trimmed.StartsWith('/')) {
-            $trimmed = $trimmed.Substring(1)
-        }
-        return [pscustomobject]@{
-            Pattern = $trimmed
-            Negated = $negated
-        }
+        param([string]$line)
+        $trim = $line.Trim()
+        if ($trim -match '^(#|\s*$)') { return $null }
+        $neg = $false; if ($trim.StartsWith('!')) { $neg = $true; $trim = $trim.Substring(1).Trim() }
+        $anch = $false; if ($trim.StartsWith('/')) { $anch = $true; $trim = $trim.Substring(1) }
+        $dirOnly = $false; if ($trim.EndsWith('/')) { $dirOnly = $true; $trim = $trim.TrimEnd('/') }
+        return [pscustomobject]@{ Pattern=$trim; Negated=$neg; Anchored=$anch; DirOnly=$dirOnly }
     }
 
-    $gitignorePatterns = @()
-    foreach ($line in $rawGitignoreLines) {
-        $obj = Convert-GitignoreLine $line
-        if ($obj) {
-            $gitignorePatterns += $obj
-        }
-    }
-
-    # Convert AdditionalIgnore patterns into the same structure
-    # We'll treat them as if they were lines in .gitignore
-    $extraPatterns = @()
-    foreach ($pat in $AdditionalIgnore) {
-        $trimmed = $pat.Trim()
-        if (-not [string]::IsNullOrWhiteSpace($trimmed)) {
-            # AdditionalIgnore can't have a '!' to unignore, but let's allow it for consistency
-            $negated = $false
-            if ($trimmed.StartsWith('!')) {
-                $negated = $true
-                $trimmed = $trimmed.Substring(1).Trim()
-            }
-            # No slash logic here, user can pass what they want
-            $extraPatterns += [pscustomobject]@{
-                Pattern = $trimmed
-                Negated = $negated
-            }
-        }
-    }
-
-    # Combine both sets in one list, .gitignore first, then AdditionalIgnore
-    # So AdditionalIgnore patterns have priority if they match last.
+    $gitignorePatterns = $rawGitignoreLines | ForEach-Object { Convert-GitignoreLine $_ } | Where-Object { $_ }
+    $extraPatterns = $AdditionalIgnore | ForEach-Object { Convert-GitignoreLine $_ } | Where-Object { $_ }
     $allPatterns = $gitignorePatterns + $extraPatterns
 
-    # 2) Determine if a path should be ignored
+    # Evalúa si se debe ignorar
     function Should-Ignore {
-        param([string] $relativePath)
-
+        param([string]$rel)
         $ignored = $false
-        foreach ($rule in $allPatterns) {
-            $pattern = $rule.Pattern
-            $hasWildcard = $pattern -match '[\*\?]'
-
+        foreach ($r in $allPatterns) {
+            if ($r.DirOnly -and -not ($rel -like "$($r.Pattern)/*")) { continue }
             $match = $false
-
-            if ($hasWildcard) {
-                # If the pattern has wildcards, use -like
-                if ($relativePath -like $pattern) {
-                    $match = $true
-                }
+            if ($r.Anchored) {
+                $match = $rel -like $r.Pattern -or $rel -like "$($r.Pattern)/*"
+            }
+            elseif ($r.Pattern.Contains('/')) {
+                $match = $rel -like "*$($r.Pattern)*"
             }
             else {
-                # No wildcard means "ignore exactly that name or any subpath"
-                # e.g. "target" => ignore "target" or "target/..."
-                if (
-                    $relativePath -eq $pattern -or
-                    ($relativePath -like "$pattern/*")
-                ) {
-                    $match = $true
-                }
+                $leaf = Split-Path $rel -Leaf
+                $match = $leaf -like $r.Pattern
             }
-
             if ($match) {
-                # The last match is authoritative
-                $ignored = -not $rule.Negated
+                $ignored = -not $r.Negated
             }
         }
-
         return $ignored
     }
 
-    # 3) Get all items recursively, filter out hidden & ignored
-    $allItems = Get-ChildItem -Path $Path -Recurse -Force |
-        Where-Object {
-            # Exclude items starting with '.' in the name
-            if ($_.Name.StartsWith('.')) {
-                return $false
+    # Recorre directorios manualmente evitando .git y aplicando reglas
+    function Enumerate {
+        param([string]$dir, [string]$base)
+
+        $items = Get-ChildItem $dir -Force
+        foreach ($item in $items) {
+            $rel = $item.FullName.Substring($base.Length).TrimStart('\','/') -replace '\\','/'
+
+            if ($item.PSIsContainer) {
+                if ($item.Name -like '.*') { continue }
+                if ($item.Attributes -band [IO.FileAttributes]::Hidden) { continue }
+                if (Should-Ignore $rel) { continue }
+
+                # Recursión
+                Enumerate -dir $item.FullName -base $base
             }
+            else {
+                if ($item.Name -like '.*') { continue }
+                if ($item.Attributes -band [IO.FileAttributes]::Hidden) { continue }
+                if (Should-Ignore $rel) { continue }
 
-            # Exclude Windows-hidden items
-            if ([bool]($_.Attributes -band [IO.FileAttributes]::Hidden)) {
-                return $false
+                # Acumular archivo válido
+                $script:collectedFiles += ,@{
+                    Path = $item.FullName
+                    Rel = $rel
+                }
             }
-
-            # Build relative path
-            $baseFullPath = (Resolve-Path $Path).ProviderPath
-            $itemFullPath = $_.FullName
-            $relativePath = $itemFullPath.Substring($baseFullPath.Length).TrimStart('\','/')
-            # Normalize directory separators
-            $relativePath = $relativePath -replace '\\','/'
-
-            # If Should-Ignore => ignore
-            if (Should-Ignore $relativePath) {
-                return $false
-            }
-
-            return $true
-        } |
-        Sort-Object -Property FullName
-
-    # 4) For each remaining file, print its content
-    $filesToShow = $allItems | Where-Object { -not $_.PSIsContainer }
-    foreach ($file in $filesToShow) {
-        $baseFullPath = (Resolve-Path $Path).ProviderPath
-        $itemFullPath = $file.FullName
-        $relativePath = $itemFullPath.Substring($baseFullPath.Length).TrimStart('\','/')
-        $relativePath = $relativePath -replace '\\','/'
-
-        Write-Host "$($relativePath):"
-        Write-Host (Get-Content $file.FullName -Raw)
-        Write-Host ""  # Blank line between files
+        }
     }
+
+    $baseFull = (Resolve-Path $Path).ProviderPath
+    $script:collectedFiles = @()
+    Enumerate -dir $baseFull -base $baseFull
+
+    # Construir resultado
+    $parts = foreach ($f in $collectedFiles | Sort-Object { $_.Path }) {
+        try {
+            $content = Get-Content -Path $f.Path -Raw
+            "$($f.Rel):`n$content`n"
+        }
+        catch {
+            # Ignorar archivos que no se puedan leer
+            ""
+        }
+    }
+
+    return ($parts -join "`n")
 }
+
 
 # Aliases
 Set-Alias -Name vim -Value nvim
