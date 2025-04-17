@@ -430,10 +430,18 @@ function Show-DirectoryTree {
         [string[]] $AdditionalIgnore = @()
     )
 
-    # Print header (relative path)
-    Write-Output (Split-Path (Resolve-Path -LiteralPath $Path).ProviderPath -Leaf)
+    # Validate path exists before proceeding
+    if (-not (Test-Path -Path $Path)) {
+        Write-Error "Path '$Path' does not exist"
+        return
+    }
 
-    $rootFull = (Resolve-Path -LiteralPath $Path).ProviderPath
+    # Get full path safely
+    $rootFull = (Resolve-Path -Path $Path).ProviderPath
+
+    # Write the name of the root directory
+    $rootName = Split-Path -Path $rootFull -Leaf
+    Write-Output $rootName
 
     # Prepare Convert-GitignoreLine helper
     function Convert-GitignoreLine {
@@ -581,6 +589,7 @@ Retrieves the content of all files in the "C:\Projects" directory and its subdir
 - The function supports syntax highlighting for various file types when `UseMarkdownFence` is enabled, based on file extensions.
 
 #> 
+
 function Get-ContentRecursiveIgnore {
     [CmdletBinding()]
     param(
@@ -589,106 +598,35 @@ function Get-ContentRecursiveIgnore {
         [bool]     $UseMarkdownFence = $true
     )
 
-    #
-    # Build a case‑insensitive extension → Markdown language map
-    #
+    # Validate path exists before proceeding
+    if (-not (Test-Path -Path $Path)) {
+        Write-Error "Path '$Path' does not exist"
+        return
+    }
+
+    
+
+    # Show the directory tree before processing file contents
+    Show-DirectoryTree -Path $Path -IncludeFiles -RespectGitIgnore -AdditionalIgnore $AdditionalIgnore
+
+    Write-Output "`n`n"
+
+
+    # Get full path safely
+    $baseFull = (Resolve-Path -Path $Path).ProviderPath
+
+    # Build a case-insensitive extension → Markdown language map
     $extensionMap = [hashtable]::new([System.StringComparer]::OrdinalIgnoreCase)
     $literalMap = @{
-        # PowerShell
-        ps1        = 'powershell'
-        psm1       = 'powershell'
-        psd1       = 'powershell'
-        # Python
-        py         = 'python'
-        pyw        = 'python'
-        # JavaScript
-        js         = 'javascript'
-        mjs        = 'javascript'
-        cjs        = 'javascript'
-        jsx        = 'javascript'
-        # TypeScript
-        ts         = 'typescript'
-        tsx        = 'typescript'
-        # HTML / XML
-        html       = 'html'
-        htm        = 'html'
-        xml        = 'xml'
-        xaml       = 'xml'
-        # CSS / preprocessors
-        css        = 'css'
-        scss       = 'scss'
-        sass       = 'scss'
-        less       = 'less'
-        # JSON / data files
-        json       = 'json'
-        toml       = 'toml'
-        ini        = 'ini'
-        yaml       = 'yaml'
-        yml        = 'yaml'
-        csv        = 'csv'
-        # Markdown
-        md         = 'markdown'
-        markdown   = 'markdown'
-        # Shell scripts
-        sh         = 'bash'
-        bash       = 'bash'
-        zsh        = 'bash'
-        ksh        = 'bash'
-        fish       = 'bash'
-        # C family
-        c          = 'c'
-        h          = 'c'
-        cpp        = 'cpp'
-        cc         = 'cpp'
-        cxx        = 'cpp'
-        hh         = 'cpp'
-        hpp        = 'cpp'
-        # C#
-        cs         = 'csharp'
-        # Java
-        java       = 'java'
-        # Go
-        go         = 'go'
-        # PHP
-        php        = 'php'
-        # Ruby
-        rb         = 'ruby'
-        erb        = 'ruby'
-        # Rust
-        rs         = 'rust'
-        # Kotlin
-        kt         = 'kotlin'
-        kts        = 'kotlin'
-        # Swift
-        swift      = 'swift'
-        # Dart
-        dart       = 'dart'
-        # Scala
-        scala      = 'scala'
-        # SQL
-        sql        = 'sql'
-        # Elm
-        elm        = 'elm'
-        # Erlang
-        erl        = 'erlang'
-        # R
-        r          = 'r'
-        # MATLAB / Octave
-        m          = 'matlab'
-        # LaTeX
-        tex        = 'latex'
-        # GraphQL
-        gql        = 'graphql'
-        # Dockerfile (special case, filename based)
-        dockerfile = 'dockerfile'
+        ps1 = 'powershell'; py = 'python'; js = 'javascript'; ts = 'typescript'; html = 'html'; css = 'css';
+        json = 'json'; md = 'markdown'; sh = 'bash'; c = 'c'; cpp = 'cpp'; cs = 'csharp'; java = 'java';
+        go = 'go'; php = 'php'; rb = 'ruby'; rs = 'rust'; kt = 'kotlin'; swift = 'swift'; sql = 'sql'
     }
     foreach ($entry in $literalMap.GetEnumerator()) {
         $extensionMap[$entry.Key] = $entry.Value
     }
 
-    #
     # Parse a .gitignore line into a pattern object
-    #
     function Convert-GitignoreLine {
         param([string] $line, [string] $baseDir)
         $text = $line.Trim()
@@ -708,9 +646,7 @@ function Get-ContentRecursiveIgnore {
         }
     }
 
-    #
     # Load ignore patterns from .gitignore files
-    #
     $baseFull = (Resolve-Path $Path).ProviderPath
     $patterns = @()
     foreach ($ignore in $AdditionalIgnore) {
@@ -723,9 +659,7 @@ function Get-ContentRecursiveIgnore {
         }
     }
 
-    #
     # Scriptblock to test whether a path should be ignored
-    #
     $testIgnore = {
         param([string] $fullPath, [bool] $isDirectory)
         foreach ($rule in $patterns) {
@@ -748,9 +682,7 @@ function Get-ContentRecursiveIgnore {
         return $false
     }
 
-    #
     # Recursively enumerate files that are not ignored
-    #
     function Enumerate {
         param([string] $directory)
         Get-ChildItem -Path $directory -Force | ForEach-Object {
@@ -768,9 +700,7 @@ function Get-ContentRecursiveIgnore {
         }
     }
 
-    #
     # Generate output with fenced code blocks
-    #
     $files = Enumerate $baseFull
     $output = $files | Sort-Object FullPath | ForEach-Object {
         $relPath = $_.RelPath
