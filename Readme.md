@@ -35,13 +35,13 @@ in your PowerShell session. This will tell you where your current user profile i
    ```powershell
    . $PROFILE
    ```
-4. The profile will automatically attempt to **create** (if missing) a JSON settings file named `pwshProfileSettings.json` in the **same folder** as your `$PROFILE`.
+4. The profile will automatically attempt to **create** (if missing) a JSON settings file named `powershell.config.json` in the **same folder** as your `$PROFILE`.
 
 ## 3. How It Works
 
 ### 3.1. JSON Settings File
 
-- The profile reads and writes from a file named `pwshProfileSettings.json`, which lives alongside your `Microsoft.PowerShell_profile.ps1`.
+- The profile reads and writes from a file named `powershell.config.json`, which lives alongside your `Microsoft.PowerShell_profile.ps1`.
 - If the JSON file is **not found**, the script **creates it** using [default settings](#default-settings).
 - If the JSON is **invalid** or **empty**, the script warns you and proceeds with defaults.
 
@@ -65,7 +65,7 @@ The default settings (written in a PowerShell hashtable) look like this:
 - **CodeFolderName**: Defines the name of the folder to create under `$HOME` (e.g. `"Code"`).
 - **EnableRandomTitle**: If `true` and you use the `Hackerman` color scheme, sets a random “Hackerman-like” title in the PowerShell window.
 
-You can **manually edit** `pwshProfileSettings.json` at any time to change these settings.
+You can **manually edit** `powershell.config.json` at any time to change these settings.
 
 ### 3.3. Custom Prompt
 
@@ -92,7 +92,36 @@ The **colors** are controlled by your `PromptColorScheme`. If you set `"DefaultP
 - **Show-DirectoryTree**: Recursively retrieves non-ignored files' content respecting .gitignore.
 - **Get-ContentRecursiveIgnore**: Recursively retrieves content from non-ignored files, respecting `.gitignore` and additional ignore patterns.
 
-### 3.5. Aliases
+### 3.5. Mathematical Constants and Functions
+
+The profile now includes a set of mathematical constants and helper functions based on the `[Math]` class:
+
+- **Constants**:
+    - `$PI`: The mathematical constant Pi.
+    - `$E`: The mathematical constant e (Euler's number).
+- **Functions**:
+    - `Get-Sin($angle)`: Calculates the sine of an angle (in radians).
+    - `Get-Cos($angle)`: Calculates the cosine of an angle (in radians).
+    - `Get-Tan($angle)`: Calculates the tangent of an angle (in radians).
+    - `Get-Asin($value)`: Calculates the arcsine of a value.
+    - `Get-Acos($value)`: Calculates the arccosine of a value.
+    - `Get-Atan($value)`: Calculates the arctangent of a value.
+    - `Get-Atan2($y, $x)`: Calculates the arctangent of the quotient of two numbers.
+    - `Get-Sqrt($number)`: Calculates the square root of a number.
+    - `Get-Pow($base, $exponent)`: Raises a number to a specified power.
+    - `Get-Log($number)`: Calculates the natural (base e) logarithm of a number.
+    - `Get-Log10($number)`: Calculates the base 10 logarithm of a number.
+    - `Get-Exp($power)`: Calculates e raised to a specified power.
+    - `Get-Abs($value)`: Returns the absolute value of a number.
+    - `Get-Round($value, $digits)`: Rounds a value to a specified number of decimal places (default is 0).
+    - `Get-Ceiling($value)`: Returns the smallest integer greater than or equal to a number.
+    - `Get-Floor($value)`: Returns the largest integer less than or equal to a number.
+    - `Get-Max($val1, $val2)`: Returns the larger of two numbers.
+    - `Get-Min($val1, $val2)`: Returns the smaller of two numbers.
+    - `Get-Truncate($value)`: Calculates the integer part of a number.
+    - `Get-Sign($value)`: Returns an integer indicating the sign of a number.
+
+### 3.6. Aliases
 
 - `vim` = `nvim`
 - `vi` = `vim`
@@ -100,9 +129,9 @@ The **colors** are controlled by your `PromptColorScheme`. If you set `"DefaultP
 - `wrh` = `Write-Host`
 - `cpwd` = `Set-PWDClipboard`
 
-### 3.6. Managing Settings
+### 3.7. Managing Settings
 
-You can **edit** `pwshProfileSettings.json` directly, or from within PowerShell you can modify `$Global:UserSettings` in memory and then call:
+You can **edit** `powershell.config.json` directly, or from within PowerShell you can modify `$Global:UserSettings` in memory and then call:
 ```powershell
 Save-UserSettings
 ```

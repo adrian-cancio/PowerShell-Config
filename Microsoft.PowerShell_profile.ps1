@@ -2,18 +2,18 @@
 # 1) Path for the Settings File
 # ----------------------------------
 $ProfileFolder = Split-Path -Parent $PROFILE
-$SettingsFileName = "pwshProfileSettings.json"
+$SettingsFileName = "powershell.config.json"
 $Global:SettingsFile = Join-Path $ProfileFolder $SettingsFileName
 
 # ----------------------------------
 # 2) Default Values
 # ----------------------------------
 $Global:DefaultSettings = [ordered]@{
-    "PromptColorScheme"   = "Default"        # Default prompt color scheme
-    "DefaultPrompt"       = $false          # If true, use PowerShell's default prompt instead of the custom one
-    "AskCreateCodeFolder" = $true           # Whether to ask for the creation of the "Code" folder if missing
-    "CodeFolderName"      = "Code"          # Default name for the code folder
-    "EnableRandomTitle"   = $false          # Enables "Hackerman" style random PowerShell title
+    "Microsoft.PowerShell.Profile:PromptColorScheme"   = "Default"        # Default prompt color scheme
+    "Microsoft.PowerShell.Profile:DefaultPrompt"       = $false          # If true, use PowerShell's default prompt instead of the custom one
+    "Microsoft.PowerShell.Profile:AskCreateCodeFolder" = $true           # Whether to ask for the creation of the "Code" folder if missing
+    "Microsoft.PowerShell.Profile:CodeFolderName"      = "Code"          # Default name for the code folder
+    "Microsoft.PowerShell.Profile:EnableRandomTitle"   = $false          # Enables "Hackerman" style random PowerShell title
 }
 
 # ----------------------------------
@@ -113,8 +113,8 @@ $DirArray = @()
 # ------------------------------------------------------
 # Handle 'Code' folder based on loaded User Settings
 # ------------------------------------------------------
-$CODE = Join-Path -Path $HOME -ChildPath $Global:UserSettings["CodeFolderName"]
-$AskCreateCodeFolder = $Global:UserSettings["AskCreateCodeFolder"]
+$CODE = Join-Path -Path $HOME -ChildPath $Global:UserSettings["Microsoft.PowerShell.Profile:CodeFolderName"]
+$AskCreateCodeFolder = $Global:UserSettings["Microsoft.PowerShell.Profile:AskCreateCodeFolder"]
 
 if (!(Test-Path -Path $CODE) -and $AskCreateCodeFolder) {
     $CreateCodeFolder = Read-Host "`'$CODE`' folder not exists, create it? (Y/N)"
@@ -151,7 +151,7 @@ function Set-PromptColorScheme {
     )
 
     if ($ColorScheme -eq [PromptColorSchemes]::Hackerman) {
-        if ($Global:UserSettings["EnableRandomTitle"]) {
+        if ($Global:UserSettings["Microsoft.PowerShell.Profile:EnableRandomTitle"]) {
             Set-RandomPowerShellTitle
         }
     }
@@ -187,7 +187,7 @@ function Set-PromptColorScheme {
     }
 
     $Global:PromptColors = $ColorSchemes[$ColorScheme]    
-    $Global:UserSettings["PromptColorScheme"] = $ColorScheme.toString()
+    $Global:UserSettings["Microsoft.PowerShell.Profile:PromptColorScheme"] = $ColorScheme.toString()
 }
 
 # ----------------------------------
@@ -220,7 +220,7 @@ function Set-RandomPowerShellTitle {
 [ConsoleColor[]]$PromptColors = @()
 
 # Read if we want the default prompt
-$DefaultPrompt = $Global:UserSettings["DefaultPrompt"]
+$DefaultPrompt = $Global:UserSettings["Microsoft.PowerShell.Profile:DefaultPrompt"]
 
 # ----------------------------------
 # Custom Prompt
@@ -236,7 +236,7 @@ function Prompt() {
     }
 
     # Set the color scheme
-    Set-PromptColorScheme -ColorScheme $Global:UserSettings["PromptColorScheme"]
+    Set-PromptColorScheme -ColorScheme $Global:UserSettings["Microsoft.PowerShell.Profile:PromptColorScheme"]
 
     Write-Host "||" -NoNewline -ForegroundColor $PromptColors[1]
     Write-Host $env:USER -NoNewline -ForegroundColor $PromptColors[0]
@@ -728,6 +728,115 @@ Set-Alias -Name gvim -Value vim
 Set-Alias -Name wrh -Value Write-Host
 Set-Alias -Name cpwd -Value Set-PWDClipboard
 Set-Alias -Name tree -Value Show-DirectoryTree
+
+# ---------------------------------------------------------------------------
+# MATHEMATICAL CONSTANTS AND FUNCTIONS
+# ---------------------------------------------------------------------------
+
+# Constants
+$Global:PI = [Math]::PI
+$Global:E = [Math]::E
+
+# Functions
+function Get-Sin {
+    param([double]$Angle)
+    return [Math]::Sin($Angle)
+}
+
+function Get-Cos {
+    param([double]$Angle)
+    return [Math]::Cos($Angle)
+}
+
+function Get-Tan {
+    param([double]$Angle)
+    return [Math]::Tan($Angle)
+}
+
+function Get-Asin {
+    param([double]$Value)
+    return [Math]::Asin($Value)
+}
+
+function Get-Acos {
+    param([double]$Value)
+    return [Math]::Acos($Value)
+}
+
+function Get-Atan {
+    param([double]$Value)
+    return [Math]::Atan($Value)
+}
+
+function Get-Atan2 {
+    param([double]$y, [double]$x)
+    return [Math]::Atan2($y, $x)
+}
+
+function Get-Sqrt {
+    param([double]$Number)
+    return [Math]::Sqrt($Number)
+}
+
+function Get-Pow {
+    param([double]$Base, [double]$Exponent)
+    return [Math]::Pow($Base, $Exponent)
+}
+
+function Get-Log {
+    param([double]$Number)
+    return [Math]::Log($Number)
+}
+
+function Get-Log10 {
+    param([double]$Number)
+    return [Math]::Log10($Number)
+}
+
+function Get-Exp {
+    param([double]$Power)
+    return [Math]::Exp($Power)
+}
+
+function Get-Abs {
+    param([double]$Value)
+    return [Math]::Abs($Value)
+}
+
+function Get-Round {
+    param([double]$Value, [int]$Digits = 0)
+    return [Math]::Round($Value, $Digits)
+}
+
+function Get-Ceiling {
+    param([double]$Value)
+    return [Math]::Ceiling($Value)
+}
+
+function Get-Floor {
+    param([double]$Value)
+    return [Math]::Floor($Value)
+}
+
+function Get-Max {
+    param([double]$Val1, [double]$Val2)
+    return [Math]::Max($Val1, $Val2)
+}
+
+function Get-Min {
+    param([double]$Val1, [double]$Val2)
+    return [Math]::Min($Val1, $Val2)
+}
+
+function Get-Truncate {
+    param([double]$Value)
+    return [Math]::Truncate($Value)
+}
+
+function Get-Sign {
+    param([double]$Value)
+    return [Math]::Sign($Value)
+}
 
 # Copilot aliases
 function ghcs {
