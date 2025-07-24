@@ -1,6 +1,20 @@
 # PowerShell Config (Cross-Platform)
 
-This repository/folder contains a **custom PowerShell profile** that works on Windows, Linux, or macOS. It includes:
+This reposi```json
+{
+    "Microsoft.PowerShell.Profile:PromptColorScheme": "Default",
+    "Microsoft.PowerShell.Profile:DefaultPrompt": false,
+    "Microsoft.PowerShell.Profile:AskCreateCodeFolder": true,
+    "Microsoft.PowerShell.Profile:CodeFolderName": "Code",
+    "Microsoft.PowerShell.Profile:EnableRandomTitle": false
+}
+```
+
+- **Microsoft.PowerShell.Profile:PromptColorScheme**: Custom prompt color scheme. Options include `Default`, `Blue`, `Green`, `Cyan`, `Red`, `Magenta`, `Yellow`, `Gray`, `Random`, `Asturias`, `Spain`, `Hackerman`.
+- **Microsoft.PowerShell.Profile:DefaultPrompt**: If `true`, uses the standard PowerShell prompt instead of the custom one.
+- **Microsoft.PowerShell.Profile:AskCreateCodeFolder**: If `true`, prompts whether to create a `Code` folder under `$HOME` if it doesn't exist.
+- **Microsoft.PowerShell.Profile:CodeFolderName**: Defines the name of the folder to create under `$HOME` (e.g. `"Code"`).
+- **Microsoft.PowerShell.Profile:EnableRandomTitle**: If `true` and you use the `Hackerman` color scheme, sets a random "Hackerman-like" title in the PowerShell window.tains a **custom PowerShell profile** that works on Windows, Linux, or macOS. It includes:
 
 - A JSON-based settings system
 - A customizable prompt (with multiple color schemes)
@@ -136,6 +150,8 @@ You can **edit** `powershell.config.json` directly, or from within PowerShell yo
 Save-UserSettings
 ```
 to **persist** your changes to the JSON file.
+
+**Note**: All configuration properties follow the PowerShell naming convention with the prefix `Microsoft.PowerShell.Profile:` to maintain consistency with PowerShell's modular configuration approach.
 
 ## 4. Future Plans
 
