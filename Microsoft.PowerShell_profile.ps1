@@ -729,7 +729,6 @@ Set-Alias -Name wrh -Value Write-Host
 Set-Alias -Name cpwd -Value Set-PWDClipboard
 Set-Alias -Name tree -Value Show-DirectoryTree
 Set-Alias -Name gemini -Value Invoke-GeminiChat
-Set-Alias -Name hola -Value Invoke-GeminiChat
 
 # ---------------------------------------------------------------------------
 # MATHEMATICAL CONSTANTS AND FUNCTIONS
