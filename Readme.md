@@ -22,6 +22,16 @@ in your PowerShell session. This will tell you where your current user profile i
 
 ## 2. Installation
 
+### 2.1. System Requirements
+
+- **PowerShell 7+** (cross-platform support)
+- **For Linux/macOS Gemini integration**: OpenSSL must be installed
+  - **Ubuntu/Debian**: `sudo apt-get install openssl`
+  - **CentOS/RHEL**: `sudo yum install openssl` or `sudo dnf install openssl`
+  - **macOS**: Usually pre-installed, or install via Homebrew: `brew install openssl`
+
+### 2.2. Profile Installation
+
 1. **Create the folder** for your profile if it doesn't exist. For example, on Linux:
    ```bash
    mkdir -p ~/.config/powershell
@@ -121,33 +131,64 @@ The profile now includes a set of mathematical constants and helper functions ba
     - `Get-Truncate($value)`: Calculates the integer part of a number.
     - `Get-Sign($value)`: Returns an integer indicating the sign of a number.
 
-### 3.6. Google Gemini Chat Integration
+### 3.6. Google Gemini Chat Integration (Cross-Platform)
 
-The profile includes a secure chat integration with Google Gemini AI:
+The profile includes a secure chat integration with Google Gemini AI that works across all supported platforms:
 
 - **Invoke-GeminiChat**: Interactive chat session with Google Gemini API
-  - Securely stores API key using Windows DPAPI encryption
+  - Cross-platform secure API key storage
   - Plain text responses optimized for terminal usage
   - Persistent chat history during session
   - API key is requested only on first use
 
 **Usage Examples:**
 ```powershell
-# First time usage (will prompt for API key)
-Invoke-GeminiChat -InitialPrompt "Hello, explain PowerShell arrays"
+# Interactive mode (no parameters) - starts directly with "You:" prompt
+gemini
 
-# Using the alias
-gemini -InitialPrompt "How do I sort an array in PowerShell?"
+# With initial prompt
+gemini -InitialPrompt "Hello, explain PowerShell arrays"
+
+# Alternative syntax
+Invoke-GeminiChat -InitialPrompt "How do I sort an array in PowerShell?"
 
 # Reset stored API key
-Invoke-GeminiChat -InitialPrompt "Hi" -ResetApiKey
+gemini -ResetApiKey
 ```
 
+**Platform-Specific Security Implementation:**
+
+| Platform | Storage Method | Requirements | Security Level |
+|----------|----------------|--------------|----------------|
+| **Windows** | DPAPI (Data Protection API) | Built-in | High - User + Machine bound |
+| **macOS** | Keychain (primary)<br/>OpenSSL (fallback) | `security` command<br/>`openssl` | High - Keychain protected<br/>Medium - File encrypted |
+| **Linux** | OpenSSL AES-256-CBC | `openssl` package | Medium - File encrypted |
+
 **Security Features:**
-- API keys are encrypted using Windows DPAPI (Data Protection API)
-- Keys are tied to your user account and machine
+- **Cross-Platform Encryption**: Uses platform-specific secure storage methods
+  - **Windows**: DPAPI (Data Protection API) - tied to user account and machine
+  - **macOS**: macOS Keychain (preferred) with OpenSSL fallback
+  - **Linux**: OpenSSL AES-256-CBC encryption with user-specific salt
 - Encrypted keys are stored in `*.key` files (automatically ignored by git)
 - Keys cannot be decrypted by other users or on different machines
+- **Requirements for Linux/macOS**: OpenSSL must be installed for encryption
+
+**Installation of OpenSSL (if needed):**
+```bash
+# Ubuntu/Debian
+sudo apt-get install openssl
+
+# CentOS/RHEL
+sudo yum install openssl
+# or newer systems:
+sudo dnf install openssl
+
+# macOS (via Homebrew)
+brew install openssl
+
+# Arch Linux
+sudo pacman -S openssl
+```
 
 ### 3.7. Aliases
 

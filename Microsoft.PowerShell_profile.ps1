@@ -487,7 +487,7 @@ function Show-DirectoryTree {
             param($fullPath, $isDir)
             foreach ($r in $patterns) {
                 if ($fullPath -notlike "$($r.BaseDir)*") { continue }
-                $rel = $fullPath.Substring($r.BaseDir.Length).TrimStart('\','/').Replace('\','/')
+                $rel = $fullPath.Substring($r.BaseDir.Length).TrimStart('\', '/').Replace('\', '/')
                 if ($r.DirOnly -and -not $isDir) { continue }
                 $match = $false
                 if ($r.Anchored) {
@@ -520,26 +520,26 @@ function Show-DirectoryTree {
         if ($level -ge $Depth) { return }
 
         $items = Get-ChildItem -LiteralPath $dir -Force |
-                 Where-Object { -not ($_.Name.StartsWith('.') -or ($_.Attributes -band [IO.FileAttributes]::Hidden)) }
+        Where-Object { -not ($_.Name.StartsWith('.') -or ($_.Attributes -band [IO.FileAttributes]::Hidden)) }
 
         $dirs = $items |
-                Where-Object { $_.PSIsContainer -and -not (& $testIgnore $_.FullName $true) } |
-                Sort-Object Name
+        Where-Object { $_.PSIsContainer -and -not (& $testIgnore $_.FullName $true) } |
+        Sort-Object Name
 
         $files = if ($IncludeFiles) {
-                    $items |
-                    Where-Object { -not $_.PSIsContainer -and -not (& $testIgnore $_.FullName $false) } |
-                    Sort-Object Name
-                 }
-                 else { @() }
+            $items |
+            Where-Object { -not $_.PSIsContainer -and -not (& $testIgnore $_.FullName $false) } |
+            Sort-Object Name
+        }
+        else { @() }
 
         # Force arrays
-        $dirs  = @($dirs)
+        $dirs = @($dirs)
         $files = @($files)
         $entries = $dirs + $files
 
         for ($i = 0; $i -lt $entries.Count; $i++) {
-            $item   = $entries[$i]
+            $item = $entries[$i]
             $isLast = ($i -eq $entries.Count - 1)
             $branch = if ($isLast) { '└── ' } else { '├── ' }
 
@@ -903,16 +903,18 @@ function ghce {
 }
 
 # ---------------------------------------------------------------------------
-# GEMINI CHAT FUNCTIONS
+# GEMINI CHAT FUNCTIONS (Cross-Platform)
 # ---------------------------------------------------------------------------
 
 <#
 .SYNOPSIS
-Securely stores an encrypted API key using Windows DPAPI.
+Securely stores an encrypted API key using platform-appropriate methods.
 
 .DESCRIPTION
-This function uses Windows Data Protection API (DPAPI) to encrypt and store an API key
-securely. The key can only be decrypted by the same user on the same machine.
+This function uses different encryption methods based on the operating system:
+- Windows: DPAPI (Data Protection API)
+- Linux: OpenSSL with user-specific salt
+- macOS: Keychain (security command) or OpenSSL fallback
 
 .PARAMETER ApiKey
 The API key to store securely.
@@ -930,17 +932,48 @@ function Set-SecureApiKey {
     )
     
     try {
-        # Convert the API key to a secure string
-        $secureString = ConvertTo-SecureString -String $ApiKey -AsPlainText -Force
-        
-        # Convert to encrypted standard string using DPAPI
-        $encryptedString = ConvertFrom-SecureString -SecureString $secureString
-        
-        # Store in user's profile directory
-        $keyFile = Join-Path $ProfileFolder "$KeyName.key"
-        $encryptedString | Out-File -FilePath $keyFile -Encoding UTF8
-        
-        Write-Host "API key stored securely at: $keyFile" -ForegroundColor Green
+        if ($IsWindows) {
+            # Windows: Use DPAPI
+            $secureString = ConvertTo-SecureString -String $ApiKey -AsPlainText -Force
+            $encryptedString = ConvertFrom-SecureString -SecureString $secureString
+            $keyFile = Join-Path $ProfileFolder "$KeyName.key"
+            $encryptedString | Out-File -FilePath $keyFile -Encoding UTF8
+            Write-Host "API key stored securely using Windows DPAPI at: $keyFile" -ForegroundColor Green
+        }
+        elseif ($IsMacOS) {
+            # macOS: Try to use Keychain first, fallback to file-based encryption
+            try {
+                $serviceName = "PowerShell-Profile-$KeyName"
+                $accountName = $env:USER
+                
+                # Store in macOS Keychain
+                $process = Start-Process -FilePath "security" -ArgumentList @(
+                    "add-generic-password",
+                    "-a", $accountName,
+                    "-s", $serviceName,
+                    "-w", $ApiKey,
+                    "-U"
+                ) -Wait -PassThru -NoNewWindow
+                
+                if ($process.ExitCode -eq 0) {
+                    Write-Host "API key stored securely in macOS Keychain" -ForegroundColor Green
+                    return
+                }
+            }
+            catch {
+                Write-Warning "Failed to use macOS Keychain, falling back to file encryption"
+            }
+            
+            # Fallback: File-based encryption for macOS
+            Set-SecureApiKeyUnix -ApiKey $ApiKey -KeyName $KeyName
+        }
+        elseif ($IsLinux) {
+            # Linux: File-based encryption with OpenSSL
+            Set-SecureApiKeyUnix -ApiKey $ApiKey -KeyName $KeyName
+        }
+        else {
+            Write-Error "Unsupported operating system for secure key storage"
+        }
     }
     catch {
         Write-Error "Failed to store API key: $($_.Exception.Message)"
@@ -949,10 +982,65 @@ function Set-SecureApiKey {
 
 <#
 .SYNOPSIS
-Retrieves and decrypts a stored API key.
+Unix/Linux secure key storage using OpenSSL encryption.
 
 .DESCRIPTION
-This function retrieves and decrypts an API key that was stored using Set-SecureApiKey.
+Internal function for storing API keys securely on Unix-like systems using OpenSSL.
+#>
+function Set-SecureApiKeyUnix {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ApiKey,
+        
+        [string]$KeyName = "GeminiAPI"
+    )
+    
+    # Check if openssl is available
+    $opensslPath = Get-Command openssl -ErrorAction SilentlyContinue
+    if (-not $opensslPath) {
+        Write-Error "OpenSSL is required for secure key storage on this platform but was not found. Please install OpenSSL."
+        return
+    }
+    
+    # Create a user-specific salt based on username and machine
+    $saltData = "$env:USER$(hostname)PowerShell$KeyName"
+    $salt = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($saltData))
+    $saltHex = [System.BitConverter]::ToString($salt).Replace('-', '').Substring(0, 16)
+    
+    # Create the key file path
+    $keyFile = Join-Path $ProfileFolder "$KeyName.key"
+    
+    # Encrypt the API key using OpenSSL
+    $tempFile = [System.IO.Path]::GetTempFileName()
+    try {
+        $ApiKey | Out-File -FilePath $tempFile -Encoding UTF8 -NoNewline
+        
+        $process = Start-Process -FilePath "openssl" -ArgumentList @(
+            "enc", "-aes-256-cbc", "-salt", "-pbkdf2", "-iter", "100000",
+            "-in", $tempFile, "-out", $keyFile, "-pass", "pass:$saltHex"
+        ) -Wait -PassThru -NoNewWindow
+        
+        if ($process.ExitCode -eq 0) {
+            Write-Host "API key stored securely using OpenSSL encryption at: $keyFile" -ForegroundColor Green
+        }
+        else {
+            Write-Error "Failed to encrypt API key with OpenSSL"
+        }
+    }
+    finally {
+        if (Test-Path $tempFile) {
+            Remove-Item $tempFile -Force
+        }
+    }
+}
+
+<#
+.SYNOPSIS
+Retrieves and decrypts a stored API key using platform-appropriate methods.
+
+.DESCRIPTION
+This function retrieves API keys using different decryption methods based on the operating system.
 
 .PARAMETER KeyName
 The name/identifier for the API key. Defaults to 'GeminiAPI'.
@@ -964,28 +1052,117 @@ function Get-SecureApiKey {
     )
     
     try {
-        $keyFile = Join-Path $ProfileFolder "$KeyName.key"
-        
-        if (-not (Test-Path $keyFile)) {
+        if ($IsWindows) {
+            # Windows: Use DPAPI
+            $keyFile = Join-Path $ProfileFolder "$KeyName.key"
+            
+            if (-not (Test-Path $keyFile)) {
+                return $null
+            }
+            
+            $encryptedString = Get-Content -Path $keyFile -Raw
+            $secureString = ConvertTo-SecureString -String $encryptedString.Trim()
+            
+            $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureString)
+            $apiKey = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+            [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
+            
+            return $apiKey
+        }
+        elseif ($IsMacOS) {
+            # macOS: Try Keychain first, fallback to file-based decryption
+            try {
+                $serviceName = "PowerShell-Profile-$KeyName"
+                $accountName = $env:USER
+                
+                $process = Start-Process -FilePath "security" -ArgumentList @(
+                    "find-generic-password",
+                    "-a", $accountName,
+                    "-s", $serviceName,
+                    "-w"
+                ) -Wait -PassThru -NoNewWindow -RedirectStandardOutput
+                
+                if ($process.ExitCode -eq 0) {
+                    $apiKey = $process.StandardOutput.ReadToEnd().Trim()
+                    if (-not [string]::IsNullOrEmpty($apiKey)) {
+                        return $apiKey
+                    }
+                }
+            }
+            catch {
+                # Fallback to file-based decryption
+            }
+            
+            # Fallback: File-based decryption for macOS
+            return Get-SecureApiKeyUnix -KeyName $KeyName
+        }
+        elseif ($IsLinux) {
+            # Linux: File-based decryption
+            return Get-SecureApiKeyUnix -KeyName $KeyName
+        }
+        else {
+            Write-Error "Unsupported operating system for secure key retrieval"
             return $null
         }
-        
-        # Read the encrypted string
-        $encryptedString = Get-Content -Path $keyFile -Raw
-        
-        # Convert back to secure string
-        $secureString = ConvertTo-SecureString -String $encryptedString.Trim()
-        
-        # Convert to plain text
-        $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureString)
-        $apiKey = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
-        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
-        
-        return $apiKey
     }
     catch {
         Write-Error "Failed to retrieve API key: $($_.Exception.Message)"
         return $null
+    }
+}
+
+<#
+.SYNOPSIS
+Unix/Linux secure key retrieval using OpenSSL decryption.
+
+.DESCRIPTION
+Internal function for retrieving API keys securely on Unix-like systems using OpenSSL.
+#>
+function Get-SecureApiKeyUnix {
+    [CmdletBinding()]
+    param(
+        [string]$KeyName = "GeminiAPI"
+    )
+    
+    # Check if openssl is available
+    $opensslPath = Get-Command openssl -ErrorAction SilentlyContinue
+    if (-not $opensslPath) {
+        Write-Error "OpenSSL is required for secure key retrieval on this platform but was not found."
+        return $null
+    }
+    
+    $keyFile = Join-Path $ProfileFolder "$KeyName.key"
+    
+    if (-not (Test-Path $keyFile)) {
+        return $null
+    }
+    
+    # Recreate the same salt used for encryption
+    $saltData = "$env:USER$(hostname)PowerShell$KeyName"
+    $salt = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($saltData))
+    $saltHex = [System.BitConverter]::ToString($salt).Replace('-', '').Substring(0, 16)
+    
+    # Decrypt the API key using OpenSSL
+    $tempFile = [System.IO.Path]::GetTempFileName()
+    try {
+        $process = Start-Process -FilePath "openssl" -ArgumentList @(
+            "enc", "-aes-256-cbc", "-d", "-pbkdf2", "-iter", "100000",
+            "-in", $keyFile, "-out", $tempFile, "-pass", "pass:$saltHex"
+        ) -Wait -PassThru -NoNewWindow
+        
+        if ($process.ExitCode -eq 0 -and (Test-Path $tempFile)) {
+            $apiKey = Get-Content -Path $tempFile -Raw
+            return $apiKey.Trim()
+        }
+        else {
+            Write-Error "Failed to decrypt API key with OpenSSL"
+            return $null
+        }
+    }
+    finally {
+        if (Test-Path $tempFile) {
+            Remove-Item $tempFile -Force
+        }
     }
 }
 
@@ -999,10 +1176,11 @@ It includes a system instruction to ensure all responses are plain text without 
 which is ideal for a terminal environment.
 The session ends when the user types 'exit' or 'quit'.
 
-The API key is stored securely using Windows DPAPI on first use.
+The API key is stored securely using platform-appropriate encryption methods.
 
 .PARAMETER InitialPrompt
-The first question or message to start the conversation with the chatbot.
+The first question or message to start the conversation with the chatbot. If not provided, 
+the function will start with an interactive prompt.
 
 .PARAMETER Model
 The Gemini model to use. Defaults to 'gemini-1.5-flash-latest'.
@@ -1015,14 +1193,17 @@ Invoke-GeminiChat -InitialPrompt "Give me a Python code example to sort a list."
 
 .EXAMPLE
 Invoke-GeminiChat -InitialPrompt "Hello" -ResetApiKey
+
+.EXAMPLE
+gemini
+# Starts interactive mode directly
 #>
 function Invoke-GeminiChat {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)]
-        [string]$InitialPrompt,
+        [string]$InitialPrompt = "",
 
-        [string]$Model = "gemini-1.5-flash-latest",
+        [string]$Model = "gemini-2.5-flash",
         
         [switch]$ResetApiKey
     )
@@ -1033,7 +1214,8 @@ function Invoke-GeminiChat {
     if ($ResetApiKey.IsPresent) {
         Write-Host "Resetting API key..." -ForegroundColor Yellow
         $apiKey = $null
-    } else {
+    }
+    else {
         $apiKey = Get-SecureApiKey -KeyName "GeminiAPI"
     }
     
@@ -1062,7 +1244,7 @@ function Invoke-GeminiChat {
     $uri = "https://generativelanguage.googleapis.com/v1beta/models/$($Model):generateContent"
     
     $headers = @{
-        "Content-Type" = "application/json"
+        "Content-Type"   = "application/json"
         "X-goog-api-key" = $apiKey
     }
 
@@ -1073,19 +1255,26 @@ function Invoke-GeminiChat {
     $systemInstructionText = "You are a helpful assistant for a user in a command-line terminal. All of your responses must be in plain text only. Do not use any Markdown formatting. This means no asterisks for bold or italics, no backticks for code blocks, no hash symbols for headers, and no hyphens or numbers for lists. Format everything as simple, readable text suitable for a terminal that does not render Markdown."
     
     # --- Interactive Chat Loop ---
-    $currentPrompt = $InitialPrompt
+    # If no initial prompt was provided, start with interactive mode
+    $currentPrompt = if ([string]::IsNullOrWhiteSpace($InitialPrompt)) {
+        Write-Host ""  # Add a blank line for better spacing
+        Read-Host "You"
+    }
+    else {
+        $InitialPrompt
+    }
 
     while ($currentPrompt -notin @("exit", "quit")) {
 
         $userMessage = @{
-            role = "user"
+            role  = "user"
             parts = @(@{ text = $currentPrompt })
         }
         $chatHistory += $userMessage
 
         # Add the 'systemInstruction' to the request body
         $body = @{
-            contents = $chatHistory
+            contents          = $chatHistory
             systemInstruction = @{
                 parts = @( @{ text = $systemInstructionText } )
             }
@@ -1102,8 +1291,9 @@ function Invoke-GeminiChat {
             if ($null -eq $response.candidates) {
                 Write-Warning "The API did not return a valid response. The content may have been blocked."
                 $modelText = "I am unable to provide a response to that."
-            } else {
-                 $modelText = $response.candidates[0].content.parts[0].text
+            }
+            else {
+                $modelText = $response.candidates[0].content.parts[0].text
             }
         }
         catch {
@@ -1118,9 +1308,11 @@ function Invoke-GeminiChat {
         }
 
         Write-Host $modelText
+        Write-Host ""  # Add an additional blank line for better spacing
+        Write-Host ""  # Add another blank line for user input separation
 
         $modelMessage = @{
-            role = "model"
+            role  = "model"
             parts = @(@{ text = $modelText })
         }
         $chatHistory += $modelMessage
