@@ -909,6 +909,388 @@ function ghce {
 
 <#
 .SYNOPSIS
+Analyzes PowerShell code for potential system risks.
+
+.DESCRIPTION
+This function analyzes PowerShell code to determine if it contains commands that could
+affect the system (files, users, network, etc.) and require user confirmation.
+
+.PARAMETER Code
+The PowerShell code to analyze.
+
+.RETURNS
+Returns $true if the code is potentially risky and requires confirmation, $false otherwise.
+#>
+function Test-PowerShellCodeRisk {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Code
+    )
+    
+    # Define risky command patterns (cross-platform)
+    $riskyPatterns = @(
+        # File system operations
+        '(Remove-Item|rm|del|Delete)',
+        '(New-Item|mkdir|md)',
+        '(Copy-Item|cp|copy)',
+        '(Move-Item|mv|move)',
+        '(Rename-Item|ren|rename)',
+        '(Set-Content|Out-File)',
+        '(Add-Content|>>)',
+        '>\s*[^|]',  # Redirection to file (not pipe)
+        '>\s*\$',    # Redirection to end of line
+        
+        # Registry operations (Windows)
+        '(New-ItemProperty|Set-ItemProperty|Remove-ItemProperty)',
+        '(New-PSDrive|Remove-PSDrive)',
+        'HKEY_|HKLM:|HKCU:|Registry::',
+        
+        # Service and process management
+        '(Start-Service|Stop-Service|Restart-Service)',
+        '(Start-Process|Stop-Process|Kill)',
+        '(Get-Service|Set-Service)',
+        
+        # Network operations
+        '(Invoke-WebRequest|Invoke-RestMethod|wget|curl)',
+        '(Start-Job|Receive-Job)',
+        '(Enter-PSSession|New-PSSession)',
+        
+        # User and security management
+        '(New-LocalUser|Remove-LocalUser|Set-LocalUser)',
+        '(Add-LocalGroupMember|Remove-LocalGroupMember)',
+        '(Set-ExecutionPolicy)',
+        '(Import-Module.*-Force)',
+        
+        # System configuration
+        '(Set-ItemProperty.*-Path.*HKLM)',
+        '(Set-Location.*System32|Set-Location.*Windows)',
+        '(Start-Sleep\s+\d{4,})', # Very long sleeps
+        
+        # Dangerous cmdlets
+        '(Invoke-Expression|iex)',
+        '(Invoke-Command)',
+        '(Start-Transcript|Stop-Transcript)',
+        
+        # File downloads or execution
+        '(DownloadString|DownloadFile)',
+        '(Start-BitsTransfer)',
+        '\.exe\s|\.msi\s|\.bat\s|\.cmd\s',
+        
+        # Unix/Linux specific dangerous operations
+        '(sudo|su\s)',
+        '(chmod\s+[0-7]{3,4})',
+        '(chown|chgrp)',
+        '(mount|umount)',
+        '(fdisk|mkfs)',
+        '(systemctl|service)',
+        '(useradd|userdel|usermod)',
+        '(groupadd|groupdel)',
+        '(passwd|chpasswd)',
+        '(crontab|at\s)',
+        '(iptables|ufw)',
+        '(ssh-keygen|ssh-copy-id)',
+        
+        # Package management (risky installations)
+        '(apt|yum|dnf|brew|pip|npm).*install',
+        '(dpkg|rpm).*-i',
+        
+        # macOS specific operations
+        '(launchctl)',
+        '(dscl|dseditgroup)',
+        '(csrutil|spctl)',
+        '(diskutil)',
+        
+        # Shell execution patterns
+        '(bash|sh|zsh|fish).*-c',
+        '(/bin/|/usr/bin/)',
+        '&\s*$',  # Background execution
+        ';\s*(rm|del)'  # Command chaining with deletion
+    )
+    
+    # Check for risky patterns
+    foreach ($pattern in $riskyPatterns) {
+        if ($Code -match $pattern) {
+            return $true
+        }
+    }
+    
+    # Check for file paths that could be system critical (cross-platform)
+    $systemPaths = @(
+        # Windows critical paths
+        'C:\\Windows\\',
+        'C:\\Program Files',
+        'C:\\Users\\.*\\AppData',
+        '\$env:WINDIR',
+        '\$env:PROGRAMFILES',
+        '\$env:PROGRAMDATA',
+        '\$env:SYSTEMROOT',
+        
+        # Linux/Unix critical paths
+        '/etc/',
+        '/bin/',
+        '/sbin/',
+        '/usr/bin/',
+        '/usr/sbin/',
+        '/usr/local/bin/',
+        '/root/',
+        '/boot/',
+        '/sys/',
+        '/proc/',
+        '/dev/',
+        '/var/log/',
+        '/var/run/',
+        '/tmp/.*\.sh',
+        '/opt/',
+        '\$HOME/\.config',
+        '\$HOME/\.local',
+        
+        # macOS specific paths
+        '/System/',
+        '/Library/',
+        '/Applications/',
+        '/Users/.*/Library/',
+        '/private/',
+        '/usr/local/',
+        '\$HOME/Library/'
+    )
+    
+    foreach ($path in $systemPaths) {
+        if ($Code -match $path) {
+            return $true
+        }
+    }
+    
+    return $false
+}
+
+<#
+.SYNOPSIS
+Executes PowerShell code safely with risk analysis.
+
+.DESCRIPTION
+This function executes PowerShell code after analyzing it for potential risks.
+Risky code requires user confirmation before execution.
+
+.PARAMETER Code
+The PowerShell code to execute.
+
+.PARAMETER AutoApprove
+If true, skips confirmation for risky code (use with caution).
+
+.RETURNS
+Returns an object with ExecutionResult, Output, Error, and WasRisky properties.
+#>
+function Invoke-SafePowerShellCode {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Code,
+        
+        [switch]$AutoApprove
+    )
+    
+    $result = [PSCustomObject]@{
+        ExecutionResult = $null
+        Output = ""
+        Error = ""
+        WasRisky = $false
+        UserApproved = $false
+        Executed = $false
+    }
+    
+    # Clean the code (remove code block markers if present)
+    $cleanCode = $Code -replace '^```(?:powershell|ps1)?\s*', '' -replace '```\s*$', ''
+    $cleanCode = $cleanCode.Trim()
+    
+    if ([string]::IsNullOrWhiteSpace($cleanCode)) {
+        $result.Error = "No code provided to execute"
+        return $result
+    }
+    
+    # Analyze code for risks
+    $isRisky = Test-PowerShellCodeRisk -Code $cleanCode
+    $result.WasRisky = $isRisky
+    
+    # If risky and not auto-approved, ask for confirmation
+    if ($isRisky -and -not $AutoApprove.IsPresent) {
+        Write-Host "`n" -NoNewline
+        Write-Host "[SECURITY WARNING]" -ForegroundColor White -BackgroundColor DarkRed
+        Write-Host " The following code may affect your system:" -ForegroundColor Yellow
+        Write-Host "`n--- CODE TO EXECUTE ---" -ForegroundColor Cyan
+        Write-Host $cleanCode -ForegroundColor Gray
+        Write-Host "--- END CODE ---`n" -ForegroundColor Cyan
+        
+        do {
+            $confirmation = Read-Host "Do you want to execute this code? (y/N/s=show again)"
+            $confirmation = $confirmation.ToLower()
+            
+            if ($confirmation -eq 's') {
+                Write-Host "`n--- CODE TO EXECUTE ---" -ForegroundColor Cyan
+                Write-Host $cleanCode -ForegroundColor Gray
+                Write-Host "--- END CODE ---`n" -ForegroundColor Cyan
+                continue
+            }
+        } while ($confirmation -eq 's')
+        
+        if ($confirmation -ne 'y' -and $confirmation -ne 'yes') {
+            $result.Error = "Code execution cancelled by user"
+            return $result
+        }
+        
+        $result.UserApproved = $true
+    }
+    
+    # Execute the code
+    try {
+        $result.Executed = $true
+        
+        # Capture both output and errors
+        $scriptBlock = [ScriptBlock]::Create($cleanCode)
+        $job = Start-Job -ScriptBlock $scriptBlock
+        
+        # Wait for job completion with timeout (30 seconds)
+        $timeoutSeconds = 30
+        $job | Wait-Job -Timeout $timeoutSeconds | Out-Null
+        
+        if ($job.State -eq 'Running') {
+            $job | Stop-Job
+            $result.Error = "Code execution timed out after $timeoutSeconds seconds"
+        }
+        elseif ($job.State -eq 'Completed') {
+            $output = Receive-Job -Job $job 2>&1
+            
+            # Separate output and errors
+            $outputLines = @()
+            $errorLines = @()
+            
+            foreach ($item in $output) {
+                if ($item -is [System.Management.Automation.ErrorRecord]) {
+                    $errorLines += $item.ToString()
+                }
+                else {
+                    $outputLines += $item.ToString()
+                }
+            }
+            
+            $result.Output = ($outputLines -join "`n").Trim()
+            $result.Error = ($errorLines -join "`n").Trim()
+            $result.ExecutionResult = "Success"
+        }
+        else {
+            $result.Error = "Code execution failed with state: $($job.State)"
+            $result.ExecutionResult = "Failed"
+        }
+        
+        # Clean up the job
+        Remove-Job -Job $job -Force
+    }
+    catch {
+        $result.Error = "Execution error: $($_.Exception.Message)"
+        $result.ExecutionResult = "Error"
+    }
+    
+    return $result
+}
+
+<#
+.SYNOPSIS
+Executes extracted code blocks and returns a formatted summary for Gemini.
+
+.DESCRIPTION
+This function takes extracted code blocks, executes them safely, and creates a formatted
+summary that can be sent to Gemini for further analysis or action.
+
+.PARAMETER CodeBlocks
+Array of code strings to execute.
+
+.RETURNS
+Returns a formatted string summarizing the execution results.
+#>
+function Invoke-ExtractedCodeBlocks {
+    [CmdletBinding()]
+    param(
+        [string[]]$CodeBlocks
+    )
+    
+    if (-not $CodeBlocks -or $CodeBlocks.Count -eq 0) {
+        return $null
+    }
+    
+    $executionSummary = @()
+    $executionSummary += "=== RESULTADOS DE EJECUCIÓN DE CÓDIGO ==="
+    $executionSummary += ""
+    
+    for ($i = 0; $i -lt $CodeBlocks.Count; $i++) {
+        $codeBlock = $CodeBlocks[$i]
+        
+        Write-Host "`n" -NoNewline
+        Write-Host "[EJECUTANDO CÓDIGO $($i + 1)]" -ForegroundColor White -BackgroundColor DarkBlue
+        Write-Host $codeBlock -ForegroundColor Cyan
+        
+        # Execute the code
+        $execResult = Invoke-SafePowerShellCode -Code $codeBlock
+        
+        # Display execution results
+        Write-Host "`n[RESULTADO $($i + 1)]" -ForegroundColor White -BackgroundColor DarkGreen
+        
+        # Add to summary for Gemini
+        $executionSummary += "CÓDIGO $($i + 1):"
+        $executionSummary += "``````"
+        $executionSummary += $codeBlock
+        $executionSummary += "``````"
+        $executionSummary += ""
+        
+        if ($execResult.Executed) {
+            if (-not [string]::IsNullOrWhiteSpace($execResult.Output)) {
+                Write-Host $execResult.Output -ForegroundColor Gray
+                $executionSummary += "SALIDA:"
+                $executionSummary += $execResult.Output
+                $executionSummary += ""
+            }
+            
+            if (-not [string]::IsNullOrWhiteSpace($execResult.Error)) {
+                Write-Host "Errores:" -ForegroundColor Red
+                Write-Host $execResult.Error -ForegroundColor Yellow
+                $executionSummary += "ERRORES:"
+                $executionSummary += $execResult.Error
+                $executionSummary += ""
+            }
+            
+            if ([string]::IsNullOrWhiteSpace($execResult.Output) -and [string]::IsNullOrWhiteSpace($execResult.Error)) {
+                Write-Host "Código ejecutado exitosamente (sin salida)" -ForegroundColor Green
+                $executionSummary += "RESULTADO: Código ejecutado exitosamente (sin salida)"
+                $executionSummary += ""
+            }
+        }
+        else {
+            Write-Host "Ejecución cancelada o falló" -ForegroundColor Red
+            if (-not [string]::IsNullOrWhiteSpace($execResult.Error)) {
+                Write-Host $execResult.Error -ForegroundColor Yellow
+            }
+            $executionSummary += "RESULTADO: Ejecución cancelada o falló"
+            if (-not [string]::IsNullOrWhiteSpace($execResult.Error)) {
+                $executionSummary += "ERROR: $($execResult.Error)"
+            }
+            $executionSummary += ""
+        }
+        
+        if ($execResult.WasRisky) {
+            $executionSummary += "NOTA: Este código fue marcado como riesgoso y requirió confirmación del usuario."
+            $executionSummary += ""
+        }
+        
+        $executionSummary += "---"
+        $executionSummary += ""
+    }
+    
+    Write-Host "" # Add blank line after all executions
+    
+    return ($executionSummary -join "`n")
+}
+
+<#
+.SYNOPSIS
 Processes PowerShell format commands embedded in text and renders them with proper styling.
 
 .DESCRIPTION
@@ -925,8 +1307,38 @@ function Format-GeminiText {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Text
+        [string]$Text,
+        
+        [switch]$ExecuteCode
     )
+    
+    # Extract and store code blocks for later execution
+    $Global:ExtractedCodeBlocks = @()
+    
+    if ($ExecuteCode.IsPresent) {
+        # Look for PowerShell code blocks using [CODE] tags
+        $codeBlockPattern = '\[CODE\](.*?)\[/CODE\]'
+        $codeMatches = [regex]::Matches($Text, $codeBlockPattern, [System.Text.RegularExpressions.RegexOptions]::Singleline -bor [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        
+        if ($codeMatches.Count -gt 0) {
+            foreach ($match in $codeMatches) {
+                $codeContent = $match.Groups[1].Value.Trim()
+                if (-not [string]::IsNullOrWhiteSpace($codeContent)) {
+                    $Global:ExtractedCodeBlocks += $codeContent
+                }
+            }
+            
+            # Remove code blocks from text and replace with placeholder
+            $processedText = $Text
+            for ($i = $codeMatches.Count - 1; $i -ge 0; $i--) {
+                $match = $codeMatches[$i]
+                $replacement = "`n`n[FG:Cyan]>>> Código detectado y marcado para ejecución...[/FG]`n"
+                $processedText = $processedText.Remove($match.Index, $match.Length).Insert($match.Index, $replacement)
+            }
+            
+            $Text = $processedText
+        }
+    }
     
     # Split text by format commands while preserving the commands
     $parts = $Text -split '(\[(?:FG|BG|STYLE):[^\]]+\]|\[/(?:FG|BG|STYLE)\])'
@@ -1350,6 +1762,24 @@ function Invoke-GeminiChat {
     $systemInstructionText = @"
 You are a helpful assistant for a user in a PowerShell command-line terminal. You can use special PowerShell formatting commands to style your text responses.
 
+CRITICAL: THINK ABOUT TERMINAL CONTEXT BEFORE RESPONDING
+Before writing your response, remember:
+- You are writing for a TERMINAL WINDOW, not a web browser or document
+- Terminal users prefer CONCISE, SCANNABLE responses
+- Long paragraphs are hard to read in a terminal
+- Use SHORT LINES (60-80 characters when possible)
+- Break complex information into BULLET POINTS or SHORT PARAGRAPHS
+- Use FORMATTING to make text easy to scan quickly
+- Terminal users often want QUICK ANSWERS, not essays
+
+RESPONSE FORMATTING GUIDELINES:
+1. Keep responses CONCISE but helpful
+2. Use bullet points (•) or dashes (-) for lists
+3. Break long text into SHORT paragraphs (2-3 lines max)
+4. Use formatting colors to make information SCANNABLE
+5. Put the most important information FIRST
+6. Use blank lines to separate different topics
+
 AVAILABLE FORMATTING COMMANDS:
 1. Text Colors (Foreground): [FG:ColorName]text[/FG]
     - Available colors: Black, DarkBlue, DarkGreen, DarkCyan, DarkRed, DarkMagenta, DarkYellow, Gray, DarkGray, Blue, Green, Cyan, Red, Magenta, Yellow, White
@@ -1361,23 +1791,42 @@ AVAILABLE FORMATTING COMMANDS:
 
 3. You can combine formats: [FG:White][BG:DarkBlue]White text on dark blue background[/BG][/FG]
 
-FORMATTING GUIDELINES:
-- Use colors to highlight important information, warnings, or different types of content
-- [FG:Green] for success messages, confirmations, or positive information
-- [FG:Yellow] for warnings, cautions, or important notes
-- [FG:Red] for errors, critical information, or urgent warnings
-- [FG:Cyan] for commands, code snippets, or technical terms
-- [FG:Magenta] for PowerShell-specific terms, variables, or parameters
-- [FG:Blue] for file paths, URLs, or references
-- Use background colors sparingly for emphasis: [BG:DarkRed][FG:White]CRITICAL[/FG][/BG]
+TERMINAL-OPTIMIZED FORMATTING STRATEGY:
+- [FG:Green] for SUCCESS, confirmations, positive results
+- [FG:Yellow] for WARNINGS, important notes, cautions
+- [FG:Red] for ERRORS, critical info, urgent warnings
+- [FG:Cyan] for COMMANDS, code snippets, technical terms
+- [FG:Magenta] for PARAMETERS, variables, PowerShell-specific terms
+- [FG:Blue] for FILE PATHS, URLs, references
+- [FG:White] for HEADINGS or emphasis
+- Use [BG:DarkRed][FG:White] sparingly for CRITICAL alerts
 
-EXAMPLES:
-- "To run this [FG:Cyan]Get-Process[/FG] command, use [FG:Magenta]-Name[/FG] parameter"
-- "[FG:Yellow]Warning:[/FG] This operation cannot be undone"
-- "[FG:Green]Success![/FG] The operation completed successfully"
-- "Navigate to [FG:Blue]C:\Users\YourName\Documents[/FG]"
+TERMINAL-FRIENDLY RESPONSE EXAMPLES:
 
-Remember: Only use the formatting commands shown above. Do not use Markdown, HTML, Markdown or any other formatting syntax.
+GOOD (Terminal-optimized):
+[FG:Green]✓ Process found:[/FG]
+• Name: notepad.exe
+• PID: 1234
+• CPU: 0.5%
+
+[FG:Yellow]Tip:[/FG] Use [FG:Cyan]Get-Process -Name notepad[/FG] to filter
+
+BAD (Too verbose for terminal):
+"The Get-Process cmdlet is a very powerful tool that allows you to retrieve information about running processes on your system. When you use this cmdlet, it will return a comprehensive list of all currently running processes, including detailed information such as process names, process IDs, CPU usage statistics, memory consumption, and various other performance metrics that can be extremely useful for system monitoring and troubleshooting purposes."
+
+LANGUAGE ADAPTATION:
+- Always respond in the SAME LANGUAGE as the user
+- If user writes in Spanish, respond in Spanish
+- If user writes in English, respond in English
+- Maintain language consistency throughout the conversation
+
+RESPONSE LENGTH GUIDELINES:
+- For simple questions: 1-3 lines maximum
+- For explanations: Use bullet points, max 5-7 points
+- For complex topics: Break into sections with clear headings
+- Always prioritize CLARITY over completeness in terminal context
+
+Remember: Terminal users value SPEED and CLARITY over detailed explanations. Make every line count!
 "@
     
     # --- Interactive Chat Loop ---
