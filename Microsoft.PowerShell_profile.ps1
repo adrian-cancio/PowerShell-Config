@@ -1195,102 +1195,6 @@ function Invoke-SafePowerShellCode {
 
 <#
 .SYNOPSIS
-Executes extracted code blocks and returns a formatted summary for Gemini.
-
-.DESCRIPTION
-This function takes extracted code blocks, executes them safely, and creates a formatted
-summary that can be sent to Gemini for further analysis or action.
-
-.PARAMETER CodeBlocks
-Array of code strings to execute.
-
-.RETURNS
-Returns a formatted string summarizing the execution results.
-#>
-function Invoke-ExtractedCodeBlocks {
-    [CmdletBinding()]
-    param(
-        [string[]]$CodeBlocks
-    )
-    
-    if (-not $CodeBlocks -or $CodeBlocks.Count -eq 0) {
-        return $null
-    }
-    
-    $executionSummary = @()
-    $executionSummary += "=== RESULTADOS DE EJECUCIÓN DE CÓDIGO ==="
-    $executionSummary += ""
-    
-    for ($i = 0; $i -lt $CodeBlocks.Count; $i++) {
-        $codeBlock = $CodeBlocks[$i]
-        
-        Write-Host "`n" -NoNewline
-        Write-Host "[EJECUTANDO CÓDIGO $($i + 1)]" -ForegroundColor White -BackgroundColor DarkBlue
-        Write-Host $codeBlock -ForegroundColor Cyan
-        
-        # Execute the code
-        $execResult = Invoke-SafePowerShellCode -Code $codeBlock
-        
-        # Display execution results
-        Write-Host "`n[RESULTADO $($i + 1)]" -ForegroundColor White -BackgroundColor DarkGreen
-        
-        # Add to summary for Gemini
-        $executionSummary += "CÓDIGO $($i + 1):"
-        $executionSummary += "``````"
-        $executionSummary += $codeBlock
-        $executionSummary += "``````"
-        $executionSummary += ""
-        
-        if ($execResult.Executed) {
-            if (-not [string]::IsNullOrWhiteSpace($execResult.Output)) {
-                Write-Host $execResult.Output -ForegroundColor Gray
-                $executionSummary += "SALIDA:"
-                $executionSummary += $execResult.Output
-                $executionSummary += ""
-            }
-            
-            if (-not [string]::IsNullOrWhiteSpace($execResult.Error)) {
-                Write-Host "Errores:" -ForegroundColor Red
-                Write-Host $execResult.Error -ForegroundColor Yellow
-                $executionSummary += "ERRORES:"
-                $executionSummary += $execResult.Error
-                $executionSummary += ""
-            }
-            
-            if ([string]::IsNullOrWhiteSpace($execResult.Output) -and [string]::IsNullOrWhiteSpace($execResult.Error)) {
-                Write-Host "Código ejecutado exitosamente (sin salida)" -ForegroundColor Green
-                $executionSummary += "RESULTADO: Código ejecutado exitosamente (sin salida)"
-                $executionSummary += ""
-            }
-        }
-        else {
-            Write-Host "Ejecución cancelada o falló" -ForegroundColor Red
-            if (-not [string]::IsNullOrWhiteSpace($execResult.Error)) {
-                Write-Host $execResult.Error -ForegroundColor Yellow
-            }
-            $executionSummary += "RESULTADO: Ejecución cancelada o falló"
-            if (-not [string]::IsNullOrWhiteSpace($execResult.Error)) {
-                $executionSummary += "ERROR: $($execResult.Error)"
-            }
-            $executionSummary += ""
-        }
-        
-        if ($execResult.WasRisky) {
-            $executionSummary += "NOTA: Este código fue marcado como riesgoso y requirió confirmación del usuario."
-            $executionSummary += ""
-        }
-        
-        $executionSummary += "---"
-        $executionSummary += ""
-    }
-    
-    Write-Host "" # Add blank line after all executions
-    
-    return ($executionSummary -join "`n")
-}
-
-<#
-.SYNOPSIS
 Processes PowerShell format commands embedded in text and renders them with proper styling.
 
 .DESCRIPTION
@@ -1307,38 +1211,8 @@ function Format-GeminiText {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Text,
-        
-        [switch]$ExecuteCode
+        [string]$Text
     )
-    
-    # Extract and store code blocks for later execution
-    $Global:ExtractedCodeBlocks = @()
-    
-    if ($ExecuteCode.IsPresent) {
-        # Look for PowerShell code blocks using [CODE] tags
-        $codeBlockPattern = '\[CODE\](.*?)\[/CODE\]'
-        $codeMatches = [regex]::Matches($Text, $codeBlockPattern, [System.Text.RegularExpressions.RegexOptions]::Singleline -bor [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-        
-        if ($codeMatches.Count -gt 0) {
-            foreach ($match in $codeMatches) {
-                $codeContent = $match.Groups[1].Value.Trim()
-                if (-not [string]::IsNullOrWhiteSpace($codeContent)) {
-                    $Global:ExtractedCodeBlocks += $codeContent
-                }
-            }
-            
-            # Remove code blocks from text and replace with placeholder
-            $processedText = $Text
-            for ($i = $codeMatches.Count - 1; $i -ge 0; $i--) {
-                $match = $codeMatches[$i]
-                $replacement = "`n`n[FG:Cyan]>>> Código detectado y marcado para ejecución...[/FG]`n"
-                $processedText = $processedText.Remove($match.Index, $match.Length).Insert($match.Index, $replacement)
-            }
-            
-            $Text = $processedText
-        }
-    }
     
     # Split text by format commands while preserving the commands
     $parts = $Text -split '(\[(?:FG|BG|STYLE):[^\]]+\]|\[/(?:FG|BG|STYLE)\])'
@@ -1760,7 +1634,7 @@ function Invoke-GeminiChat {
     # --- SYSTEM INSTRUCTION ---
     # This key instruction tells the model how to behave and explains PowerShell formatting.
     $systemInstructionText = @"
-You are a helpful assistant for a user in a PowerShell command-line terminal. You can use special PowerShell formatting commands to style your text responses.
+You are a helpful assistant for a user in a PowerShell command-line terminal. You provide concise, scannable responses optimized for terminal reading.
 
 CRITICAL: THINK ABOUT TERMINAL CONTEXT BEFORE RESPONDING
 Before writing your response, remember:
@@ -1771,6 +1645,7 @@ Before writing your response, remember:
 - Break complex information into BULLET POINTS or SHORT PARAGRAPHS
 - Use FORMATTING to make text easy to scan quickly
 - Terminal users often want QUICK ANSWERS, not essays
+- Users may be in the middle of work - respect their time
 
 RESPONSE FORMATTING GUIDELINES:
 1. Keep responses CONCISE but helpful
@@ -1779,10 +1654,12 @@ RESPONSE FORMATTING GUIDELINES:
 4. Use formatting colors to make information SCANNABLE
 5. Put the most important information FIRST
 6. Use blank lines to separate different topics
+7. Prefer vertical lists over horizontal comma-separated lists
+8. Use HEADINGS with colors for different sections
 
 AVAILABLE FORMATTING COMMANDS:
 1. Text Colors (Foreground): [FG:ColorName]text[/FG]
-    - Available colors: Black, DarkBlue, DarkGreen, DarkCyan, DarkRed, DarkMagenta, DarkYellow, Gray, DarkGray, Blue, Green, Cyan, Red, Magenta, Yellow, White
+    - Colors: Black, DarkBlue, DarkGreen, DarkCyan, DarkRed, DarkMagenta, DarkYellow, Gray, DarkGray, Blue, Green, Cyan, Red, Magenta, Yellow, White
     - Example: [FG:Red]This text is red[/FG]
 
 2. Background Colors: [BG:ColorName]text[/BG]
@@ -1793,7 +1670,7 @@ AVAILABLE FORMATTING COMMANDS:
 
 TERMINAL-OPTIMIZED FORMATTING STRATEGY:
 - [FG:Green] for SUCCESS, confirmations, positive results
-- [FG:Yellow] for WARNINGS, important notes, cautions
+- [FG:Yellow] for WARNINGS, important notes, cautions  
 - [FG:Red] for ERRORS, critical info, urgent warnings
 - [FG:Cyan] for COMMANDS, code snippets, technical terms
 - [FG:Magenta] for PARAMETERS, variables, PowerShell-specific terms
@@ -1804,15 +1681,24 @@ TERMINAL-OPTIMIZED FORMATTING STRATEGY:
 TERMINAL-FRIENDLY RESPONSE EXAMPLES:
 
 GOOD (Terminal-optimized):
-[FG:Green]✓ Process found:[/FG]
-• Name: notepad.exe
-• PID: 1234
-• CPU: 0.5%
+[FG:White]Process Information:[/FG]
+• [FG:Cyan]Name:[/FG] notepad.exe
+• [FG:Cyan]PID:[/FG] 1234  
+• [FG:Cyan]CPU:[/FG] 0.5%
 
 [FG:Yellow]Tip:[/FG] Use [FG:Cyan]Get-Process -Name notepad[/FG] to filter
 
 BAD (Too verbose for terminal):
-"The Get-Process cmdlet is a very powerful tool that allows you to retrieve information about running processes on your system. When you use this cmdlet, it will return a comprehensive list of all currently running processes, including detailed information such as process names, process IDs, CPU usage statistics, memory consumption, and various other performance metrics that can be extremely useful for system monitoring and troubleshooting purposes."
+"The Get-Process cmdlet is a very powerful tool that allows you to retrieve information about running processes on your system. When you use this cmdlet, it will return a comprehensive list of all currently running processes, including detailed information such as process names, process IDs, CPU usage statistics, memory consumption, and various other performance metrics..."
+
+SPECIFIC TERMINAL GUIDELINES:
+- Avoid walls of text - break into digestible chunks
+- Use indentation with spaces for sub-items
+- Put commands in [FG:Cyan] color for easy identification
+- Use consistent spacing and alignment
+- When listing steps, number them clearly
+- For error messages, use [FG:Red] and be specific about solutions
+- When suggesting multiple options, use bullet points
 
 LANGUAGE ADAPTATION:
 - Always respond in the SAME LANGUAGE as the user
@@ -1824,9 +1710,18 @@ RESPONSE LENGTH GUIDELINES:
 - For simple questions: 1-3 lines maximum
 - For explanations: Use bullet points, max 5-7 points
 - For complex topics: Break into sections with clear headings
+- For lists: Prefer vertical format over horizontal
 - Always prioritize CLARITY over completeness in terminal context
 
-Remember: Terminal users value SPEED and CLARITY over detailed explanations. Make every line count!
+PRACTICAL TERMINAL TIPS:
+- Structure responses like a well-formatted man page
+- Use white space effectively - don't cram information
+- Make the first line answer the question directly
+- Put detailed explanations after the main answer
+- Use consistent formatting patterns throughout conversation
+- Consider that users might need to copy/paste commands
+
+Remember: Terminal users value SPEED and CLARITY over detailed explanations. Make every line count and every color meaningful!
 "@
     
     # --- Interactive Chat Loop ---
