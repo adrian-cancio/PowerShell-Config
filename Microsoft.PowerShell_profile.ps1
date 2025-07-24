@@ -908,6 +908,95 @@ function ghce {
 
 <#
 .SYNOPSIS
+Processes PowerShell format commands embedded in text and renders them with proper styling.
+
+.DESCRIPTION
+This function processes special format commands that Gemini can use to apply text styling
+in PowerShell terminals. It supports colors, formatting, and cross-platform compatibility.
+
+.PARAMETER Text
+The text containing format commands to process.
+
+.EXAMPLE
+Format-GeminiText "This is [FG:Red]red text[/FG] and [BG:Yellow]yellow background[/BG]"
+#>
+function Format-GeminiText {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Text
+    )
+    
+    # Split text by format commands while preserving the commands
+    $parts = $Text -split '(\[(?:FG|BG|STYLE):[^\]]+\]|\[/(?:FG|BG|STYLE)\])'
+    
+    $currentFG = $null
+    $currentBG = $null
+    $currentStyle = @()
+    
+    foreach ($part in $parts) {
+        if ([string]::IsNullOrEmpty($part)) { continue }
+        
+        # Check if this part is a format command
+        if ($part -match '^\[(\w+):([^\]]+)\]$') {
+            $command = $matches[1]
+            $value = $matches[2]
+            
+            switch ($command) {
+                "FG" { 
+                    $currentFG = $value 
+                }
+                "BG" { 
+                    $currentBG = $value 
+                }
+                "STYLE" {
+                    if ($value -notin $currentStyle) {
+                        $currentStyle += $value
+                    }
+                }
+            }
+        }
+        elseif ($part -match '^\[/(\w+)\]$') {
+            $command = $matches[1]
+            
+            switch ($command) {
+                "FG" { $currentFG = $null }
+                "BG" { $currentBG = $null }
+                "STYLE" { $currentStyle = @() }
+            }
+        }
+        else {
+            # This is regular text, output it with current formatting
+            $writeParams = @{
+                Object    = $part
+                NoNewline = $true
+            }
+            
+            if ($currentFG) {
+                try {
+                    $writeParams.ForegroundColor = [ConsoleColor]$currentFG
+                }
+                catch {
+                    # If color name is invalid, ignore it
+                }
+            }
+            
+            if ($currentBG) {
+                try {
+                    $writeParams.BackgroundColor = [ConsoleColor]$currentBG
+                }
+                catch {
+                    # If color name is invalid, ignore it
+                }
+            }
+            
+            Write-Host @writeParams
+        }
+    }
+}
+
+<#
+.SYNOPSIS
 Securely stores an encrypted API key using platform-appropriate methods.
 
 .DESCRIPTION
@@ -1168,22 +1257,27 @@ function Get-SecureApiKeyUnix {
 
 <#
 .SYNOPSIS
-Starts an interactive chat session with a Google Gemini model, forcing plain text responses.
+Starts an interactive chat session with a Google Gemini model with PowerShell text formatting support.
 
 .DESCRIPTION
 This function sends an initial prompt to the Gemini API and establishes a chat loop.
-It includes a system instruction to ensure all responses are plain text without Markdown,
-which is ideal for a terminal environment.
+It includes a system instruction that teaches Gemini how to use PowerShell formatting commands
+for colored and styled text output, which works across all supported operating systems.
 The session ends when the user types 'exit' or 'quit'.
 
 The API key is stored securely using platform-appropriate encryption methods.
+
+Gemini can use these formatting commands:
+- [FG:ColorName]text[/FG] for colored text
+- [BG:ColorName]text[/BG] for background colors
+- Available colors: Black, DarkBlue, DarkGreen, DarkCyan, DarkRed, DarkMagenta, DarkYellow, Gray, DarkGray, Blue, Green, Cyan, Red, Magenta, Yellow, White
 
 .PARAMETER InitialPrompt
 The first question or message to start the conversation with the chatbot. If not provided, 
 the function will start with an interactive prompt.
 
 .PARAMETER Model
-The Gemini model to use. Defaults to 'gemini-1.5-flash-latest'.
+The Gemini model to use. Defaults to 'gemini-2.5-flash'.
 
 .PARAMETER ResetApiKey
 Forces the function to ask for a new API key, replacing the stored one.
@@ -1196,7 +1290,7 @@ Invoke-GeminiChat -InitialPrompt "Hello" -ResetApiKey
 
 .EXAMPLE
 gemini
-# Starts interactive mode directly
+# Starts interactive mode directly with formatting support
 #>
 function Invoke-GeminiChat {
     [CmdletBinding()]
@@ -1239,7 +1333,7 @@ function Invoke-GeminiChat {
     }
 
     # --- Initial Setup ---
-    Write-Host "Starting chat with model '$Model' (Plain Text mode). Type 'exit' or 'quit' to end." -ForegroundColor Cyan
+    Write-Host "Starting chat with model '$Model' (PowerShell Formatting enabled). Type 'exit' or 'quit' to end." -ForegroundColor Cyan
 
     $uri = "https://generativelanguage.googleapis.com/v1beta/models/$($Model):generateContent"
     
@@ -1251,8 +1345,39 @@ function Invoke-GeminiChat {
     $chatHistory = @()
 
     # --- SYSTEM INSTRUCTION ---
-    # This key instruction tells the model how to behave.
-    $systemInstructionText = "You are a helpful assistant for a user in a command-line terminal. All of your responses must be in plain text only. Do not use any Markdown formatting. This means no asterisks for bold or italics, no backticks for code blocks, no hash symbols for headers, and no hyphens or numbers for lists. Format everything as simple, readable text suitable for a terminal that does not render Markdown."
+    # This key instruction tells the model how to behave and explains PowerShell formatting.
+    $systemInstructionText = @"
+You are a helpful assistant for a user in a PowerShell command-line terminal. You can use special PowerShell formatting commands to style your text responses.
+
+AVAILABLE FORMATTING COMMANDS:
+1. Text Colors (Foreground): [FG:ColorName]text[/FG]
+    - Available colors: Black, DarkBlue, DarkGreen, DarkCyan, DarkRed, DarkMagenta, DarkYellow, Gray, DarkGray, Blue, Green, Cyan, Red, Magenta, Yellow, White
+    - Example: [FG:Red]This text is red[/FG]
+
+2. Background Colors: [BG:ColorName]text[/BG]
+    - Same color names as foreground
+    - Example: [BG:Yellow]This has yellow background[/BG]
+
+3. You can combine formats: [FG:White][BG:DarkBlue]White text on dark blue background[/BG][/FG]
+
+FORMATTING GUIDELINES:
+- Use colors to highlight important information, warnings, or different types of content
+- [FG:Green] for success messages, confirmations, or positive information
+- [FG:Yellow] for warnings, cautions, or important notes
+- [FG:Red] for errors, critical information, or urgent warnings
+- [FG:Cyan] for commands, code snippets, or technical terms
+- [FG:Magenta] for PowerShell-specific terms, variables, or parameters
+- [FG:Blue] for file paths, URLs, or references
+- Use background colors sparingly for emphasis: [BG:DarkRed][FG:White]CRITICAL[/FG][/BG]
+
+EXAMPLES:
+- "To run this [FG:Cyan]Get-Process[/FG] command, use [FG:Magenta]-Name[/FG] parameter"
+- "[FG:Yellow]Warning:[/FG] This operation cannot be undone"
+- "[FG:Green]Success![/FG] The operation completed successfully"
+- "Navigate to [FG:Blue]C:\Users\YourName\Documents[/FG]"
+
+Remember: Only use the formatting commands shown above. Do not use Markdown, HTML, Markdown or any other formatting syntax.
+"@
     
     # --- Interactive Chat Loop ---
     # If no initial prompt was provided, start with interactive mode
@@ -1285,7 +1410,6 @@ function Invoke-GeminiChat {
             # Add a blank line for better spacing
             Write-Host ""
             
-            Write-Host "Gemini: " -ForegroundColor Green -NoNewline
             $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -ContentType "application/json"
             
             if ($null -eq $response.candidates) {
@@ -1307,9 +1431,11 @@ function Invoke-GeminiChat {
             break 
         }
 
-        Write-Host $modelText
+        Write-Host "Gemini: " -ForegroundColor Green -NoNewline
+        Format-GeminiText -Text $modelText
         Write-Host ""  # Add an additional blank line for better spacing
         Write-Host ""  # Add another blank line for user input separation
+        Write-Host ""  # Add an extra blank line before user input
 
         $modelMessage = @{
             role  = "model"
