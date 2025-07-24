@@ -4,3 +4,4 @@ Modules
 Scripts
 
 powershell.config.json
+*.key

@@ -169,28 +169,7 @@ to **persist** your changes to the JSON file.
 
 **Note**: All configuration properties follow the PowerShell naming convention with the prefix `Microsoft.PowerShell.Profile:` to maintain consistency with PowerShell's modular configuration approach.
 
-**Future Modular Configuration**: In upcoming versions, the configuration will support module management:
-```json
-{
-    "Microsoft.PowerShell.Profile:PromptColorScheme": "Default",
-    "Microsoft.PowerShell.Profile:DefaultPrompt": false,
-    "Microsoft.PowerShell.Profile:AskCreateCodeFolder": true,
-    "Microsoft.PowerShell.Profile:CodeFolderName": "Code",
-    "Microsoft.PowerShell.Profile:EnableRandomTitle": false,
-    "Microsoft.PowerShell.Profile:EnabledModules": ["AI", "Math"],
-    "Microsoft.PowerShell.Profile:ModuleAutoUpdate": true
-}
-```
-
 ## 4. Future Plans
 
 - **Installation Script**: A script that automatically installs the profile for Windows/Linux/macOS by placing it in the right folder, generating the JSON file, etc.
-- **Modular Function Installation**: Implementation of an optional module system where additional functionality can be installed on-demand:
-  - **Core Profile**: Basic prompt, settings system, and essential utilities (default installation)
-  - **AI Integration Module**: Google Gemini chat functionality (`Install-ProfileModule -Name "AI"`)
-  - **Mathematics Module**: Mathematical constants and calculation functions (`Install-ProfileModule -Name "Math"`)
-  - **Development Module**: Git operations, Docker commands, and developer tools (`Install-ProfileModule -Name "Dev"`)
-  - **System Module**: Advanced system monitoring and management functions (`Install-ProfileModule -Name "System"`)
-  - **Custom Modules**: Allow users to create and share their own function modules
-  - Each module would be stored separately and loaded conditionally based on user preferences
 - **More Custom Commands**: Additional aliases or functions to streamline various tasks (e.g., Git operations, Docker commands, etc.).

@@ -728,6 +728,7 @@ Set-Alias -Name gvim -Value vim
 Set-Alias -Name wrh -Value Write-Host
 Set-Alias -Name cpwd -Value Set-PWDClipboard
 Set-Alias -Name tree -Value Show-DirectoryTree
+Set-Alias -Name gemini -Value Invoke-GeminiChat
 
 # ---------------------------------------------------------------------------
 # MATHEMATICAL CONSTANTS AND FUNCTIONS
@@ -899,4 +900,234 @@ function ghce {
     clean {
         $Env:GH_DEBUG = $envGhDebug
     }
+}
+
+# ---------------------------------------------------------------------------
+# GEMINI CHAT FUNCTIONS
+# ---------------------------------------------------------------------------
+
+<#
+.SYNOPSIS
+Securely stores an encrypted API key using Windows DPAPI.
+
+.DESCRIPTION
+This function uses Windows Data Protection API (DPAPI) to encrypt and store an API key
+securely. The key can only be decrypted by the same user on the same machine.
+
+.PARAMETER ApiKey
+The API key to store securely.
+
+.PARAMETER KeyName
+The name/identifier for the API key. Defaults to 'GeminiAPI'.
+#>
+function Set-SecureApiKey {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ApiKey,
+        
+        [string]$KeyName = "GeminiAPI"
+    )
+    
+    try {
+        # Convert the API key to a secure string
+        $secureString = ConvertTo-SecureString -String $ApiKey -AsPlainText -Force
+        
+        # Convert to encrypted standard string using DPAPI
+        $encryptedString = ConvertFrom-SecureString -SecureString $secureString
+        
+        # Store in user's profile directory
+        $keyFile = Join-Path $ProfileFolder "$KeyName.key"
+        $encryptedString | Out-File -FilePath $keyFile -Encoding UTF8
+        
+        Write-Host "API key stored securely at: $keyFile" -ForegroundColor Green
+    }
+    catch {
+        Write-Error "Failed to store API key: $($_.Exception.Message)"
+    }
+}
+
+<#
+.SYNOPSIS
+Retrieves and decrypts a stored API key.
+
+.DESCRIPTION
+This function retrieves and decrypts an API key that was stored using Set-SecureApiKey.
+
+.PARAMETER KeyName
+The name/identifier for the API key. Defaults to 'GeminiAPI'.
+#>
+function Get-SecureApiKey {
+    [CmdletBinding()]
+    param(
+        [string]$KeyName = "GeminiAPI"
+    )
+    
+    try {
+        $keyFile = Join-Path $ProfileFolder "$KeyName.key"
+        
+        if (-not (Test-Path $keyFile)) {
+            return $null
+        }
+        
+        # Read the encrypted string
+        $encryptedString = Get-Content -Path $keyFile -Raw
+        
+        # Convert back to secure string
+        $secureString = ConvertTo-SecureString -String $encryptedString.Trim()
+        
+        # Convert to plain text
+        $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureString)
+        $apiKey = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
+        
+        return $apiKey
+    }
+    catch {
+        Write-Error "Failed to retrieve API key: $($_.Exception.Message)"
+        return $null
+    }
+}
+
+<#
+.SYNOPSIS
+Starts an interactive chat session with a Google Gemini model, forcing plain text responses.
+
+.DESCRIPTION
+This function sends an initial prompt to the Gemini API and establishes a chat loop.
+It includes a system instruction to ensure all responses are plain text without Markdown,
+which is ideal for a terminal environment.
+The session ends when the user types 'exit' or 'quit'.
+
+The API key is stored securely using Windows DPAPI on first use.
+
+.PARAMETER InitialPrompt
+The first question or message to start the conversation with the chatbot.
+
+.PARAMETER Model
+The Gemini model to use. Defaults to 'gemini-1.5-flash-latest'.
+
+.PARAMETER ResetApiKey
+Forces the function to ask for a new API key, replacing the stored one.
+
+.EXAMPLE
+Invoke-GeminiChat -InitialPrompt "Give me a Python code example to sort a list."
+
+.EXAMPLE
+Invoke-GeminiChat -InitialPrompt "Hello" -ResetApiKey
+#>
+function Invoke-GeminiChat {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$InitialPrompt,
+
+        [string]$Model = "gemini-1.5-flash-latest",
+        
+        [switch]$ResetApiKey
+    )
+
+    # --- Get or Set API Key ---
+    $apiKey = $null
+    
+    if ($ResetApiKey.IsPresent) {
+        Write-Host "Resetting API key..." -ForegroundColor Yellow
+        $apiKey = $null
+    } else {
+        $apiKey = Get-SecureApiKey -KeyName "GeminiAPI"
+    }
+    
+    if ([string]::IsNullOrEmpty($apiKey)) {
+        Write-Host "Google Gemini API key not found or reset requested." -ForegroundColor Yellow
+        Write-Host "Please enter your Google Gemini API key:" -ForegroundColor Cyan
+        $inputApiKey = Read-Host -AsSecureString
+        
+        # Convert secure string to plain text for this session
+        $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($inputApiKey)
+        $apiKey = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
+        
+        if ([string]::IsNullOrEmpty($apiKey)) {
+            Write-Error "API key cannot be empty."
+            return
+        }
+        
+        # Store the API key securely
+        Set-SecureApiKey -ApiKey $apiKey -KeyName "GeminiAPI"
+    }
+
+    # --- Initial Setup ---
+    Write-Host "Starting chat with model '$Model' (Plain Text mode). Type 'exit' or 'quit' to end." -ForegroundColor Cyan
+
+    $uri = "https://generativelanguage.googleapis.com/v1beta/models/$($Model):generateContent"
+    
+    $headers = @{
+        "Content-Type" = "application/json"
+        "X-goog-api-key" = $apiKey
+    }
+
+    $chatHistory = @()
+
+    # --- SYSTEM INSTRUCTION ---
+    # This key instruction tells the model how to behave.
+    $systemInstructionText = "You are a helpful assistant for a user in a command-line terminal. All of your responses must be in plain text only. Do not use any Markdown formatting. This means no asterisks for bold or italics, no backticks for code blocks, no hash symbols for headers, and no hyphens or numbers for lists. Format everything as simple, readable text suitable for a terminal that does not render Markdown."
+    
+    # --- Interactive Chat Loop ---
+    $currentPrompt = $InitialPrompt
+
+    while ($currentPrompt -notin @("exit", "quit")) {
+
+        $userMessage = @{
+            role = "user"
+            parts = @(@{ text = $currentPrompt })
+        }
+        $chatHistory += $userMessage
+
+        # Add the 'systemInstruction' to the request body
+        $body = @{
+            contents = $chatHistory
+            systemInstruction = @{
+                parts = @( @{ text = $systemInstructionText } )
+            }
+        } | ConvertTo-Json -Depth 10
+
+        # --- API Call ---
+        try {
+            # Add a blank line for better spacing
+            Write-Host ""
+            
+            Write-Host "Gemini: " -ForegroundColor Green -NoNewline
+            $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -ContentType "application/json"
+            
+            if ($null -eq $response.candidates) {
+                Write-Warning "The API did not return a valid response. The content may have been blocked."
+                $modelText = "I am unable to provide a response to that."
+            } else {
+                 $modelText = $response.candidates[0].content.parts[0].text
+            }
+        }
+        catch {
+            # Add a blank line for better spacing before the error
+            Write-Host ""
+            Write-Error "An error occurred while contacting the Gemini API: $($_.Exception.Message)"
+            if ($_.Exception.Response) {
+                $errorBody = $_.Exception.Response.GetResponseStream() | ForEach-Object { (New-Object System.IO.StreamReader($_)).ReadToEnd() }
+                Write-Host "Error body: $errorBody" -ForegroundColor Red
+            }
+            break 
+        }
+
+        Write-Host $modelText
+
+        $modelMessage = @{
+            role = "model"
+            parts = @(@{ text = $modelText })
+        }
+        $chatHistory += $modelMessage
+
+        $currentPrompt = Read-Host "You"
+    }
+
+    Write-Host "" # Add a final blank line before exit message
+    Write-Host "Ending chat." -ForegroundColor Cyan
 }
