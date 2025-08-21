@@ -721,6 +721,119 @@ function Get-ContentRecursiveIgnore {
     return ($output -join "`n`n")
 }
 
+# ---------------------------------------------------------------------------
+# PIP WRAPPER FUNCTIONS
+# ---------------------------------------------------------------------------
+
+# Find original pip executables by their full path to avoid alias conflicts
+$Global:OriginalPipPath = $null
+$Global:OriginalPip3Path = $null
+
+# Search for pip in PATH directories
+$pathDirs = $env:PATH -split ';'
+foreach ($dir in $pathDirs) {
+    if (Test-Path $dir) {
+        $pipExe = Get-ChildItem -Path $dir -Name "pip.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($pipExe -and -not $Global:OriginalPipPath) {
+            $Global:OriginalPipPath = Join-Path $dir $pipExe
+        }
+        
+        $pip3Exe = Get-ChildItem -Path $dir -Name "pip3.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($pip3Exe -and -not $Global:OriginalPip3Path) {
+            $Global:OriginalPip3Path = Join-Path $dir $pip3Exe
+        }
+    }
+}
+
+# If .exe not found, try without extension (Linux/macOS style)
+if (-not $Global:OriginalPipPath) {
+    foreach ($dir in $pathDirs) {
+        if (Test-Path $dir) {
+            $pipExe = Get-ChildItem -Path $dir -Name "pip" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($pipExe) {
+                $Global:OriginalPipPath = Join-Path $dir $pipExe
+                break
+            }
+        }
+    }
+}
+
+if (-not $Global:OriginalPip3Path) {
+    foreach ($dir in $pathDirs) {
+        if (Test-Path $dir) {
+            $pip3Exe = Get-ChildItem -Path $dir -Name "pip3" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($pip3Exe) {
+                $Global:OriginalPip3Path = Join-Path $dir $pip3Exe
+                break
+            }
+        }
+    }
+}
+
+function Invoke-PipWrapper {
+    if (-not $Global:OriginalPipPath -or -not (Test-Path $Global:OriginalPipPath)) {
+        Write-Error "pip: command not found"
+        return
+    }
+
+    # If this is an install command and we're not in a virtual environment, show warning
+    if ($args -and $args[0] -eq "install" -and -not $env:VIRTUAL_ENV -and -not $env:CONDA_DEFAULT_ENV) {
+        $hasGlobalFlag = $args -contains "--global"
+        
+        if (-not $hasGlobalFlag) {
+            Write-Host ""
+            Write-Host "⚠️  WARNING: Installing packages globally (not in virtual environment)." -ForegroundColor Yellow
+            Write-Host "Recommended: " -ForegroundColor Gray -NoNewline
+            Write-Host "python -m venv venv" -ForegroundColor Green -NoNewline
+            Write-Host " then activate it." -ForegroundColor Gray
+            Write-Host "Or use: " -ForegroundColor Gray -NoNewline
+            Write-Host "pip install $($args[1]) --global" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "Press Enter to continue or Ctrl+C to cancel."
+            $null = Read-Host
+        }
+        
+        # Remove custom --global flag
+        $cleanArgs = $args | Where-Object { $_ -ne "--global" }
+        & $Global:OriginalPipPath @cleanArgs
+    } else {
+        # For all other commands, just pass through directly
+        & $Global:OriginalPipPath @args
+    }
+}
+
+function Invoke-Pip3Wrapper {
+    if (-not $Global:OriginalPip3Path -or -not (Test-Path $Global:OriginalPip3Path)) {
+        Write-Error "pip3: command not found"
+        return
+    }
+
+    # If this is an install command and we're not in a virtual environment, show warning
+    if ($args -and $args[0] -eq "install" -and -not $env:VIRTUAL_ENV -and -not $env:CONDA_DEFAULT_ENV) {
+        $hasGlobalFlag = $args -contains "--global"
+        
+        if (-not $hasGlobalFlag) {
+            Write-Host ""
+            Write-Host "⚠️  WARNING: Installing packages globally (not in virtual environment)." -ForegroundColor Yellow
+            Write-Host "Recommended: " -ForegroundColor Gray -NoNewline
+            Write-Host "python -m venv venv" -ForegroundColor Green -NoNewline
+            Write-Host " then activate it." -ForegroundColor Gray
+            Write-Host "Or use: " -ForegroundColor Gray -NoNewline
+            Write-Host "pip3 install $($args[1]) --global" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "Press Enter to continue or Ctrl+C to cancel."
+            $null = Read-Host
+        }
+        
+        # Remove custom --global flag
+        $cleanArgs = $args | Where-Object { $_ -ne "--global" }
+        & $Global:OriginalPip3Path @cleanArgs
+    } else {
+        # For all other commands, just pass through directly
+        & $Global:OriginalPip3Path @args
+    }
+}
+
 # Aliases
 Set-Alias -Name vim -Value nvim
 Set-Alias -Name vi -Value vim
@@ -729,6 +842,15 @@ Set-Alias -Name wrh -Value Write-Host
 Set-Alias -Name cpwd -Value Set-PWDClipboard
 Set-Alias -Name tree -Value Show-DirectoryTree
 Set-Alias -Name gemini -Value Invoke-GeminiChat
+
+# Create aliases only if the original commands exist
+if ($Global:OriginalPipPath -and (Test-Path $Global:OriginalPipPath)) {
+    Set-Alias -Name pip -Value Invoke-PipWrapper -Force
+}
+
+if ($Global:OriginalPip3Path -and (Test-Path $Global:OriginalPip3Path)) {
+    Set-Alias -Name pip3 -Value Invoke-Pip3Wrapper -Force
+}
 
 # ---------------------------------------------------------------------------
 # MATHEMATICAL CONSTANTS AND FUNCTIONS

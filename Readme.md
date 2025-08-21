@@ -11,7 +11,8 @@ A powerful, cross-platform PowerShell profile that enhances your terminal experi
 - 🎨 **Customizable Prompt**: 11 different color schemes including dynamic themes
 - 🤖 **AI Integration**: Google Gemini chat with terminal-optimized responses
 - 🧮 **Mathematical Functions**: Complete set of trigonometric and mathematical operations
-- 🐙 **GitHub Copilot**: Built-in command suggestions and explanations
+- � **Smart Pip Wrappers**: Intelligent warnings for global package installations
+- �🐙 **GitHub Copilot**: Built-in command suggestions and explanations
 - 🔒 **Secure Storage**: Cross-platform encrypted API key management
 - 📁 **Smart File Operations**: Directory trees with .gitignore support
 - ⚙️ **JSON Configuration**: Persistent settings with easy customization
@@ -73,6 +74,10 @@ Get-PublicIP
 
 # Show disk space
 Get-DiskSpace
+
+# Smart pip installations (with global warnings)
+pip install package-name       # Shows warning if not in venv
+pip install package-name --global  # Skips warning
 ```
 
 ### AI Integration
@@ -101,6 +106,42 @@ Get-Cos 0       # 1
 Get-Sqrt 16     # 4
 Get-Pow 2 3     # 8
 ```
+
+### Pip Wrapper Functions
+
+The profile includes intelligent wrappers for `pip` and `pip3` commands that warn you when installing packages globally outside of a virtual environment:
+
+```powershell
+# Installing globally will show a warning
+pip install requests
+
+# Output:
+# ⚠️  WARNING: Installing packages globally (not in virtual environment).
+# Recommended: python -m venv venv then activate it.
+# Or use: pip install requests --global
+# 
+# Press Enter to continue or Ctrl+C to cancel.
+
+# Skip warning with --global flag
+pip install requests --global
+
+# In a virtual environment, works normally (no warning)
+python -m venv myenv
+.\myenv\Scripts\Activate.ps1  # Windows
+pip install requests  # No warning shown
+```
+
+**Features:**
+- ⚠️ **Smart warnings**: Only warns for `install` commands when not in a virtual environment
+- 🔍 **Environment detection**: Automatically detects `venv` and `conda` environments
+- 🛠️ **Cross-platform**: Works on Windows, Linux, and macOS
+- 🚫 **Skip warnings**: Use `--global` flag to bypass warnings
+- 🔧 **Transparent**: All other pip commands work exactly as normal
+- 🎯 **Independent**: `pip` and `pip3` work independently with their respective binaries
+
+The wrapper detects virtual environments by checking:
+- `$env:VIRTUAL_ENV` (standard Python virtual environments)
+- `$env:CONDA_DEFAULT_ENV` (Conda environments)
 
 ### Prompt Customization
 
