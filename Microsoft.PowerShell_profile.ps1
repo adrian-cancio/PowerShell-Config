@@ -842,6 +842,7 @@ Set-Alias -Name wrh -Value Write-Host
 Set-Alias -Name cpwd -Value Set-PWDClipboard
 Set-Alias -Name tree -Value Show-DirectoryTree
 Set-Alias -Name gemini -Value Invoke-GeminiChat
+Set-Alias -Name gcm -Value Invoke-SuggestCommitMessage
 
 # Create aliases only if the original commands exist
 if ($Global:OriginalPipPath -and (Test-Path $Global:OriginalPipPath)) {
@@ -1914,4 +1915,290 @@ Remember: Terminal users value SPEED and CLARITY over detailed explanations. Mak
 
     Write-Host "" # Add a final blank line before exit message
     Write-Host "Ending chat." -ForegroundColor Cyan
+}
+
+<#
+.SYNOPSIS
+Suggests a commit message using Gemini AI based on staged changes and commit history.
+
+.DESCRIPTION
+This function analyzes your git repository's staged changes, branch name, and commit history
+to generate an appropriate commit message using Google Gemini AI. It checks if a git repository
+exists and if there are staged changes before proceeding.
+
+The generated message matches the formatting, language, and style of previous commits.
+
+.PARAMETER CommitCount
+Number of previous commits to analyze for style and context. Defaults to 100.
+
+.PARAMETER Model
+The Gemini model to use for generating the commit message. Defaults to 'gemini-2.5-flash'.
+
+.PARAMETER Force
+If specified, automatically commits with the suggested message without prompting for confirmation.
+
+.PARAMETER AdditionalInstructions
+Additional instructions to guide the commit message generation (text string).
+
+.PARAMETER InstructionsFile
+Path to a file containing additional instructions for commit message generation.
+
+.PARAMETER ResetApiKey
+Forces the function to ask for a new API key, replacing the stored one.
+
+.EXAMPLE
+Invoke-SuggestCommitMessage
+# Generates a commit message based on staged changes and prompts for action
+
+.EXAMPLE
+Invoke-SuggestCommitMessage -CommitCount 50 -Model "gemini-2.5-flash"
+# Uses the last 50 commits and specified model
+
+.EXAMPLE
+Invoke-SuggestCommitMessage -Force
+# Automatically commits with the suggested message
+
+.EXAMPLE
+Invoke-SuggestCommitMessage -AdditionalInstructions "Use conventional commits format"
+# Adds specific instructions for message generation
+
+.EXAMPLE
+gcm
+# Uses the alias to suggest a commit message
+#>
+function Invoke-SuggestCommitMessage {
+    [CmdletBinding()]
+    param(
+        [int]$CommitCount = 100,
+        
+        [string]$Model = "gemini-2.5-flash",
+        
+        [switch]$Force,
+        
+        [string]$AdditionalInstructions = "",
+        
+        [string]$InstructionsFile = "",
+        
+        [switch]$ResetApiKey
+    )
+
+    # --- Check if we're in a git repository ---
+    try {
+        $gitCheck = git rev-parse --is-inside-work-tree 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Error: Not in a git repository." -ForegroundColor Red
+            return
+        }
+    }
+    catch {
+        Write-Host "Error: Git is not available or not in a git repository." -ForegroundColor Red
+        return
+    }
+
+    # --- Check for staged changes ---
+    $stagedFiles = git diff --cached --name-only
+    if ([string]::IsNullOrWhiteSpace($stagedFiles)) {
+        Write-Host "Error: No staged changes found. Use 'git add' to stage files first." -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host "Analyzing staged changes and commit history..." -ForegroundColor Cyan
+
+    # --- Get branch name ---
+    $branchName = git rev-parse --abbrev-ref HEAD 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $branchName = "unknown"
+    }
+
+    # --- Get commit history ---
+    $commitHistory = git --no-pager log --oneline -n $CommitCount 2>&1
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($commitHistory)) {
+        $commitHistory = "No previous commits available (new repository)"
+    }
+
+    # --- Get staged diff ---
+    $stagedDiff = git diff --cached
+    if ([string]::IsNullOrWhiteSpace($stagedDiff)) {
+        Write-Host "Error: Unable to get staged diff." -ForegroundColor Red
+        return
+    }
+
+    # --- Load additional instructions from file if provided ---
+    $additionalInstructionsText = $AdditionalInstructions
+    if (-not [string]::IsNullOrWhiteSpace($InstructionsFile)) {
+        if (Test-Path $InstructionsFile) {
+            $fileContent = Get-Content -Path $InstructionsFile -Raw
+            $additionalInstructionsText = if ([string]::IsNullOrWhiteSpace($additionalInstructionsText)) {
+                $fileContent
+            } else {
+                "$additionalInstructionsText`n`n$fileContent"
+            }
+        }
+        else {
+            Write-Warning "Instructions file not found: $InstructionsFile"
+        }
+    }
+
+    # --- Get or Set API Key ---
+    $apiKey = $null
+    
+    if ($ResetApiKey.IsPresent) {
+        Write-Host "Resetting API key..." -ForegroundColor Yellow
+        $apiKey = $null
+    }
+    else {
+        $apiKey = Get-SecureApiKey -KeyName "GeminiAPI"
+    }
+    
+    if ([string]::IsNullOrEmpty($apiKey)) {
+        Write-Host "Google Gemini API key not found or reset requested." -ForegroundColor Yellow
+        Write-Host "Please enter your Google Gemini API key:" -ForegroundColor Cyan
+        $inputApiKey = Read-Host -AsSecureString
+        
+        # Convert secure string to plain text for this session
+        $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($inputApiKey)
+        $apiKey = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
+        
+        if ([string]::IsNullOrEmpty($apiKey)) {
+            Write-Error "API key cannot be empty."
+            return
+        }
+        
+        # Store the API key securely
+        Set-SecureApiKey -ApiKey $apiKey -KeyName "GeminiAPI"
+    }
+
+    # --- Prepare the prompt for Gemini ---
+    $promptText = @"
+You are a git commit message expert. Your task is to analyze the provided information and generate a concise, meaningful commit message.
+
+CONTEXT:
+- Branch: $branchName
+- Staged files: $($stagedFiles.Count) file(s)
+
+PREVIOUS COMMITS (last $CommitCount):
+$commitHistory
+
+STAGED CHANGES (diff):
+$stagedDiff
+
+INSTRUCTIONS:
+1. Analyze the staged changes to understand what was modified
+2. Review the previous commits to match their style, format, language, and length
+3. Generate a commit message that:
+   - Accurately describes the changes
+   - Matches the language used in previous commits (English, Spanish, etc.)
+   - Follows the same formatting style as previous commits
+   - Is concise but descriptive
+   - Uses appropriate prefixes if the project uses them (feat:, fix:, docs:, etc.)
+
+$(if (-not [string]::IsNullOrWhiteSpace($additionalInstructionsText)) { "ADDITIONAL INSTRUCTIONS:`n$additionalInstructionsText`n" } else { "" })
+Please provide ONLY the commit message, without any explanations or additional text.
+"@
+
+    # --- API Setup ---
+    $uri = "https://generativelanguage.googleapis.com/v1beta/models/$($Model):generateContent"
+    
+    $headers = @{
+        "Content-Type"   = "application/json"
+        "X-goog-api-key" = $apiKey
+    }
+
+    $body = @{
+        contents = @(
+            @{
+                role  = "user"
+                parts = @(@{ text = $promptText })
+            }
+        )
+    } | ConvertTo-Json -Depth 10
+
+    # --- API Call ---
+    try {
+        Write-Host "Generating commit message with model '$Model'..." -ForegroundColor Cyan
+        
+        $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -ContentType "application/json"
+        
+        if ($null -eq $response.candidates) {
+            Write-Error "The API did not return a valid response. The content may have been blocked."
+            return
+        }
+        
+        $suggestedMessage = $response.candidates[0].content.parts[0].text.Trim()
+        
+        # Remove any markdown code block markers if present
+        $suggestedMessage = $suggestedMessage -replace '^```.*\n', '' -replace '\n```$', ''
+        $suggestedMessage = $suggestedMessage.Trim()
+        
+    }
+    catch {
+        Write-Error "An error occurred while contacting the Gemini API: $($_.Exception.Message)"
+        if ($_.Exception.Response) {
+            $errorBody = $_.Exception.Response.GetResponseStream() | ForEach-Object { (New-Object System.IO.StreamReader($_)).ReadToEnd() }
+            Write-Host "Error body: $errorBody" -ForegroundColor Red
+        }
+        return
+    }
+
+    # --- Display the suggested message ---
+    Write-Host "`n" -NoNewline
+    Write-Host "═══════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "Suggested Commit Message:" -ForegroundColor Green
+    Write-Host "═══════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host $suggestedMessage -ForegroundColor White
+    Write-Host "═══════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host ""
+
+    # --- Handle user action ---
+    if ($Force.IsPresent) {
+        # Auto-commit without prompting
+        try {
+            git commit -m $suggestedMessage
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "✓ Changes committed successfully!" -ForegroundColor Green
+            }
+            else {
+                Write-Error "Failed to commit changes."
+            }
+        }
+        catch {
+            Write-Error "Error during commit: $($_.Exception.Message)"
+        }
+    }
+    else {
+        # Prompt for action
+        Write-Host "What would you like to do?" -ForegroundColor Yellow
+        Write-Host "  [C] Commit with this message" -ForegroundColor White
+        Write-Host "  [Any other key] Copy to clipboard" -ForegroundColor White
+        Write-Host ""
+        
+        $action = Read-Host "Your choice"
+        
+        if ($action -eq 'C' -or $action -eq 'c' -or $action -eq 'commit') {
+            try {
+                git commit -m $suggestedMessage
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "✓ Changes committed successfully!" -ForegroundColor Green
+                }
+                else {
+                    Write-Error "Failed to commit changes."
+                }
+            }
+            catch {
+                Write-Error "Error during commit: $($_.Exception.Message)"
+            }
+        }
+        else {
+            # Copy to clipboard
+            try {
+                Set-Clipboard -Value $suggestedMessage
+                Write-Host "✓ Commit message copied to clipboard!" -ForegroundColor Green
+            }
+            catch {
+                Write-Warning "Failed to copy to clipboard. Here's the message to copy manually:"
+                Write-Host $suggestedMessage -ForegroundColor White
+            }
+        }
+    }
 }
