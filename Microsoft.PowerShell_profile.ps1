@@ -842,7 +842,7 @@ Set-Alias -Name wrh -Value Write-Host
 Set-Alias -Name cpwd -Value Set-PWDClipboard
 Set-Alias -Name tree -Value Show-DirectoryTree
 Set-Alias -Name gemini -Value Invoke-GeminiChat
-Set-Alias -Name gcm -Value Invoke-SuggestCommitMessage
+Set-Alias -Name sgcm -Value Invoke-SuggestCommitMessage
 
 # Create aliases only if the original commands exist
 if ($Global:OriginalPipPath -and (Test-Path $Global:OriginalPipPath)) {
@@ -1963,7 +1963,7 @@ Invoke-SuggestCommitMessage -AdditionalInstructions "Use conventional commits fo
 # Adds specific instructions for message generation
 
 .EXAMPLE
-gcm
+sgcm
 # Uses the alias to suggest a commit message
 #>
 function Invoke-SuggestCommitMessage {

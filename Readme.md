@@ -88,7 +88,7 @@ pip install package-name --global  # Skips warning
 gemini "how to find large files in PowerShell"
 
 # Suggest commit message based on staged changes
-gcm  # or Invoke-SuggestCommitMessage
+sgcm  # or Invoke-SuggestCommitMessage
 # Analyzes staged changes and previous commits to generate a commit message
 
 # Use with custom options
@@ -241,7 +241,7 @@ The profile includes an intelligent commit message generator using Gemini AI:
 
 ```powershell
 # Basic usage - analyzes staged changes and suggests a commit message
-gcm
+sgcm
 # or
 Invoke-SuggestCommitMessage
 
@@ -271,7 +271,7 @@ Invoke-SuggestCommitMessage -InstructionsFile "commit-guidelines.txt"
 
 **Workflow:**
 1. Stage your changes: `git add .`
-2. Run: `gcm`
+2. Run: `sgcm`
 3. Review the AI-generated commit message
 4. Choose action: Press `C` to commit or any other key to copy to clipboard
 
@@ -334,7 +334,7 @@ Invoke-SuggestCommitMessage -InstructionsFile "commit-guidelines.txt"
 
 ### AI Integration Functions
 - `Invoke-GeminiChat` (`gemini`) - Google Gemini AI chat
-- `Invoke-SuggestCommitMessage` (`gcm`) - AI-powered commit message suggestions
+- `Invoke-SuggestCommitMessage` (`sgcm`) - AI-powered commit message suggestions
 - `Format-GeminiText` - Process Gemini formatting commands
 - `Test-PowerShellCodeRisk` - Analyze code for security risks
 - `Invoke-SafePowerShellCode` - Execute code with safety checks
@@ -352,7 +352,7 @@ Invoke-SuggestCommitMessage -InstructionsFile "commit-guidelines.txt"
 | `cpwd` | `Set-PWDClipboard` | Copy working directory |
 | `tree` | `Show-DirectoryTree` | Directory tree display |
 | `gemini` | `Invoke-GeminiChat` | AI chat |
-| `gcm` | `Invoke-SuggestCommitMessage` | AI commit message suggestions |
+| `sgcm` | `Invoke-SuggestCommitMessage` | AI commit message suggestions |
 | `wrh` | `Write-Host` | Write to host |
 
 ## 🤝 Contributing
