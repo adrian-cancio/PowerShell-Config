@@ -2131,12 +2131,13 @@ function Invoke-SuggestCommitMessage {
 
     # --- Prepare the prompt for Gemini ---
     Write-Verbose "Preparing prompt for Gemini AI..."
+    $stagedFileCount = ($stagedFiles -split '\n' | Where-Object { $_ }).Count
     $promptText = @"
 You are a git commit message expert. Your task is to analyze the provided information and generate a concise, meaningful commit message.
 
 CONTEXT:
 - Branch: $branchName
-- Staged files: $((($stagedFiles -split '\n' | Where-Object { $_ }).Count)) file(s)
+- Staged files: $stagedFileCount file(s)
 
 PREVIOUS COMMITS (last $CommitCount):
 $commitHistory
