@@ -2075,7 +2075,7 @@ You are a git commit message expert. Your task is to analyze the provided inform
 
 CONTEXT:
 - Branch: $branchName
-- Staged files: $($stagedFiles.Count) file(s)
+- Staged files: $((($stagedFiles -split '\n' | Where-Object { $_ }).Count)) file(s)
 
 PREVIOUS COMMITS (last $CommitCount):
 $commitHistory
