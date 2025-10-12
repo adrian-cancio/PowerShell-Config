@@ -273,7 +273,7 @@ Invoke-SuggestCommitMessage -InstructionsFile "commit-guidelines.txt"
 1. Stage your changes: `git add .`
 2. Run: `sgcm`
 3. Review the AI-generated commit message
-4. Choose action: Press `C` to commit or any other key to copy to clipboard
+4. Choose action: Type `commit` to commit or press Enter to copy to clipboard
 
 ## 🛠️ System Requirements
 

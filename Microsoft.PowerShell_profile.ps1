@@ -2169,13 +2169,13 @@ Please provide ONLY the commit message, without any explanations or additional t
     else {
         # Prompt for action
         Write-Host "What would you like to do?" -ForegroundColor Yellow
-        Write-Host "  [C] Commit with this message" -ForegroundColor White
-        Write-Host "  [Any other key] Copy to clipboard" -ForegroundColor White
+        Write-Host "  Type 'commit' to commit with this message" -ForegroundColor White
+        Write-Host "  Press Enter (or any other input) to copy to clipboard" -ForegroundColor White
         Write-Host ""
         
         $action = Read-Host "Your choice"
         
-        if ($action -eq 'C' -or $action -eq 'c') {
+        if ($action -ceq 'commit') {
             try {
                 git commit -m $suggestedMessage
                 if ($LASTEXITCODE -eq 0) {
