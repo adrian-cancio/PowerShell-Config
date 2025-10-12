@@ -10,9 +10,10 @@ A powerful, cross-platform PowerShell profile that enhances your terminal experi
 
 - 🎨 **Customizable Prompt**: 11 different color schemes including dynamic themes
 - 🤖 **AI Integration**: Google Gemini chat with terminal-optimized responses
+- 💬 **Smart Commit Messages**: AI-powered commit message suggestions based on staged changes
 - 🧮 **Mathematical Functions**: Complete set of trigonometric and mathematical operations
-- � **Smart Pip Wrappers**: Intelligent warnings for global package installations
-- �🐙 **GitHub Copilot**: Built-in command suggestions and explanations
+- 🐍 **Smart Pip Wrappers**: Intelligent warnings for global package installations
+- 🐙 **GitHub Copilot**: Built-in command suggestions and explanations
 - 🔒 **Secure Storage**: Cross-platform encrypted API key management
 - 📁 **Smart File Operations**: Directory trees with .gitignore support
 - ⚙️ **JSON Configuration**: Persistent settings with easy customization
@@ -85,6 +86,15 @@ pip install package-name --global  # Skips warning
 ```powershell
 # Start Gemini chat (English)
 gemini "how to find large files in PowerShell"
+
+# Suggest commit message based on staged changes
+sgcm  # or Invoke-SuggestCommitMessage
+# Analyzes staged changes and previous commits to generate a commit message
+
+# Use with custom options
+Invoke-SuggestCommitMessage -CommitCount 50 -Model "gemini-2.5-flash"
+Invoke-SuggestCommitMessage -Force  # Auto-commit without prompting
+Invoke-SuggestCommitMessage -AdditionalInstructions "Use conventional commits format"
 
 # GitHub Copilot suggestions
 ghcs "compress a folder"
@@ -225,6 +235,59 @@ Show-DirectoryTree -Path "C:\Projects" -IncludeFiles -RespectGitIgnore
 Get-ContentRecursiveIgnore -Path "C:\Projects" -UseMarkdownFence $true
 ```
 
+### AI-Powered Git Commit Messages
+
+The profile includes an intelligent commit message generator using Gemini AI:
+
+```powershell
+# Basic usage - analyzes staged changes and suggests a commit message
+sgcm
+# or
+Invoke-SuggestCommitMessage
+
+# Customize the number of previous commits to analyze (default: 100)
+Invoke-SuggestCommitMessage -CommitCount 50
+
+# Use a specific Gemini model
+Invoke-SuggestCommitMessage -Model "gemini-2.5-flash"
+
+# Auto-commit without prompting for confirmation
+Invoke-SuggestCommitMessage -Force
+
+# Add specific instructions for the commit message
+Invoke-SuggestCommitMessage -AdditionalInstructions "Use conventional commits format with emoji"
+
+# Load instructions from a file
+Invoke-SuggestCommitMessage -InstructionsFile "commit-guidelines.txt"
+
+# Show detailed progress information
+Invoke-SuggestCommitMessage -Verbose
+
+# Get just the message for use in scripts/automation
+$commitMsg = Invoke-SuggestCommitMessage -ReturnOnly
+```
+
+**Features:**
+- 🔍 **Analyzes staged changes**: Examines git diff to understand modifications
+- 📚 **Learns from history**: Reviews previous commits to match style and language
+- 🌐 **Language detection**: Generates messages in the same language as your commit history
+- 🎯 **Smart formatting**: Matches existing commit message patterns and conventions
+- ⚡ **Quick workflow**: Choose to commit immediately or copy to clipboard
+- 🎨 **Customizable**: Supports additional instructions and different AI models
+- 📋 **Shows staged files**: Displays files to be committed before taking action
+- 🔬 **Verbose mode**: Detailed progress tracking with -Verbose parameter
+- 🔄 **Message refinement**: Provide feedback to regenerate the message with AI
+- 🤖 **Scriptable**: Use -ReturnOnly for integration with other tools
+
+**Workflow:**
+1. Stage your changes: `git add .`
+2. Run: `sgcm`
+3. Review the AI-generated commit message
+4. Choose action:
+   - Type `commit` to commit with the message
+   - Press Enter to copy to clipboard
+   - Type feedback to refine the message (e.g., "make it shorter", "add emoji")
+
 ## 🛠️ System Requirements
 
 ### Core Requirements
@@ -284,6 +347,7 @@ Get-ContentRecursiveIgnore -Path "C:\Projects" -UseMarkdownFence $true
 
 ### AI Integration Functions
 - `Invoke-GeminiChat` (`gemini`) - Google Gemini AI chat
+- `Invoke-SuggestCommitMessage` (`sgcm`) - AI-powered commit message suggestions
 - `Format-GeminiText` - Process Gemini formatting commands
 - `Test-PowerShellCodeRisk` - Analyze code for security risks
 - `Invoke-SafePowerShellCode` - Execute code with safety checks
@@ -301,6 +365,7 @@ Get-ContentRecursiveIgnore -Path "C:\Projects" -UseMarkdownFence $true
 | `cpwd` | `Set-PWDClipboard` | Copy working directory |
 | `tree` | `Show-DirectoryTree` | Directory tree display |
 | `gemini` | `Invoke-GeminiChat` | AI chat |
+| `sgcm` | `Invoke-SuggestCommitMessage` | AI commit message suggestions |
 | `wrh` | `Write-Host` | Write to host |
 
 ## 🤝 Contributing
