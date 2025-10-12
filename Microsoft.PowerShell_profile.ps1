@@ -2292,7 +2292,7 @@ Please provide ONLY the commit message, without any explanations or additional t
         }
     }
     else {
-        # Show staged files before prompting
+        # Show staged files once at the beginning
         Write-Host "Staged files to be committed:" -ForegroundColor Yellow
         foreach ($file in $stagedFilesArray) {
             Write-Host "  • $file" -ForegroundColor Gray
@@ -2302,6 +2302,11 @@ Please provide ONLY the commit message, without any explanations or additional t
         # Interactive loop with refinement capability
         $continueLoop = $true
         while ($continueLoop) {
+            # Display current commit message right before prompting
+            Write-Host "Current commit message:" -ForegroundColor Cyan
+            Write-Host "  $suggestedMessage" -ForegroundColor White
+            Write-Host ""
+            
             # Prompt for action
             Write-Host "What would you like to do?" -ForegroundColor Yellow
             Write-Host "  Type 'commit' to commit with this message" -ForegroundColor White
@@ -2379,13 +2384,7 @@ Provide ONLY the refined commit message, without any explanations.
                             parts = @(@{ text = $refinedMessage })
                         }
                         
-                        # Display refined message
-                        Write-Host "`n" -NoNewline
-                        Write-Host "═══════════════════════════════════════════" -ForegroundColor Cyan
-                        Write-Host "Refined Commit Message:" -ForegroundColor Green
-                        Write-Host "═══════════════════════════════════════════" -ForegroundColor Cyan
-                        Write-Host $suggestedMessage -ForegroundColor White
-                        Write-Host "═══════════════════════════════════════════" -ForegroundColor Cyan
+                        Write-Host "✓ Message refined successfully!" -ForegroundColor Green
                         Write-Host ""
                     }
                     else {
