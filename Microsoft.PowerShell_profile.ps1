@@ -1928,8 +1928,9 @@ exists and if there are staged changes before proceeding.
 
 The generated message matches the formatting, language, and style of previous commits.
 
-Before committing, the function displays the list of staged files to ensure you are aware
-of what will be committed.
+In interactive mode, you can refine the message by providing feedback to the AI, which will
+regenerate the message while maintaining context. Before committing, the function displays
+the list of staged files to ensure you are aware of what will be committed.
 
 .PARAMETER CommitCount
 Number of previous commits to analyze for style and context. Defaults to 100.
@@ -1952,9 +1953,13 @@ Forces the function to ask for a new API key, replacing the stored one.
 .PARAMETER Verbose
 Shows detailed information about what the function is doing at each step. Use -Verbose to enable.
 
+.PARAMETER ReturnOnly
+Returns only the commit message string without any user interaction or output. Useful for
+integration with other functions or AI agents.
+
 .EXAMPLE
 Invoke-SuggestCommitMessage
-# Generates a commit message based on staged changes and prompts for action
+# Generates a commit message, allows refinement, and prompts for action
 
 .EXAMPLE
 Invoke-SuggestCommitMessage -CommitCount 50 -Model "gemini-2.5-flash"
@@ -1973,8 +1978,12 @@ Invoke-SuggestCommitMessage -Verbose
 # Shows detailed progress information
 
 .EXAMPLE
+$msg = Invoke-SuggestCommitMessage -ReturnOnly
+# Returns just the message string for use in scripts
+
+.EXAMPLE
 sgcm
-# Uses the alias to suggest a commit message
+# Uses the alias to suggest a commit message interactively
 #>
 function Invoke-SuggestCommitMessage {
     [CmdletBinding(SupportsShouldProcess)]
@@ -1989,7 +1998,9 @@ function Invoke-SuggestCommitMessage {
         
         [string]$InstructionsFile = "",
         
-        [switch]$ResetApiKey
+        [switch]$ResetApiKey,
+        
+        [switch]$ReturnOnly
     )
 
     # --- Check if we're in a git repository ---
@@ -1997,13 +2008,17 @@ function Invoke-SuggestCommitMessage {
     try {
         $gitCheck = git rev-parse --is-inside-work-tree 2>&1
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "Error: Not in a git repository." -ForegroundColor Red
+            if (-not $ReturnOnly) {
+                Write-Host "Error: Not in a git repository." -ForegroundColor Red
+            }
             return
         }
         Write-Verbose "✓ Git repository detected"
     }
     catch {
-        Write-Host "Error: Git is not available or not in a git repository." -ForegroundColor Red
+        if (-not $ReturnOnly) {
+            Write-Host "Error: Git is not available or not in a git repository." -ForegroundColor Red
+        }
         return
     }
 
@@ -2011,7 +2026,9 @@ function Invoke-SuggestCommitMessage {
     Write-Verbose "Checking for staged changes..."
     $stagedFiles = git diff --cached --name-only
     if ([string]::IsNullOrWhiteSpace($stagedFiles)) {
-        Write-Host "Error: No staged changes found. Use 'git add' to stage files first." -ForegroundColor Yellow
+        if (-not $ReturnOnly) {
+            Write-Host "Error: No staged changes found. Use 'git add' to stage files first." -ForegroundColor Yellow
+        }
         return
     }
     
@@ -2025,7 +2042,9 @@ function Invoke-SuggestCommitMessage {
         }
     }
 
-    Write-Host "Analyzing staged changes and commit history..." -ForegroundColor Cyan
+    if (-not $ReturnOnly) {
+        Write-Host "Analyzing staged changes and commit history..." -ForegroundColor Cyan
+    }
 
     # --- Get branch name ---
     Write-Verbose "Getting current branch name..."
@@ -2150,43 +2169,93 @@ Please provide ONLY the commit message, without any explanations or additional t
         "X-goog-api-key" = $apiKey
     }
 
-    $body = @{
-        contents = @(
-            @{
-                role  = "user"
-                parts = @(@{ text = $promptText })
-            }
-        )
-    } | ConvertTo-Json -Depth 10
-
     # --- API Call ---
-    try {
-        Write-Host "Generating commit message with model '$Model'..." -ForegroundColor Cyan
+    $chatHistory = @()
+    
+    # Function to call Gemini API (reusable for refinements)
+    function Invoke-GeminiForCommit {
+        param(
+            [string]$PromptText,
+            [array]$History = @()
+        )
+        
+        $bodyContents = @()
+        
+        # Add history if exists
+        if ($History.Count -gt 0) {
+            $bodyContents += $History
+        }
+        
+        # Add current user message
+        $bodyContents += @{
+            role  = "user"
+            parts = @(@{ text = $PromptText })
+        }
+        
+        $requestBody = @{
+            contents = $bodyContents
+        } | ConvertTo-Json -Depth 10
+        
+        if (-not $ReturnOnly) {
+            Write-Host "Generating commit message with model '$Model'..." -ForegroundColor Cyan
+        }
         Write-Verbose "Sending request to Gemini API..."
         
-        $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -ContentType "application/json"
+        $apiResponse = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $requestBody -ContentType "application/json"
         
         Write-Verbose "✓ Response received from Gemini API"
         
-        if ($null -eq $response.candidates) {
+        if ($null -eq $apiResponse.candidates) {
+            if ($ReturnOnly) {
+                return $null
+            }
             Write-Error "The API did not return a valid response. The content may have been blocked."
+            return $null
+        }
+        
+        $message = $apiResponse.candidates[0].content.parts[0].text.Trim()
+        
+        # Remove any markdown code block markers if present
+        $message = $message -replace '^```.*\n', '' -replace '\n```$', ''
+        $message = $message.Trim()
+        
+        return $message
+    }
+    
+    # Initial API call
+    try {
+        $suggestedMessage = Invoke-GeminiForCommit -PromptText $promptText -History $chatHistory
+        
+        if ($null -eq $suggestedMessage) {
             return
         }
         
-        $suggestedMessage = $response.candidates[0].content.parts[0].text.Trim()
-        
-        # Remove any markdown code block markers if present
-        $suggestedMessage = $suggestedMessage -replace '^```.*\n', '' -replace '\n```$', ''
-        $suggestedMessage = $suggestedMessage.Trim()
+        # Add to chat history
+        $chatHistory += @{
+            role  = "user"
+            parts = @(@{ text = $promptText })
+        }
+        $chatHistory += @{
+            role  = "model"
+            parts = @(@{ text = $suggestedMessage })
+        }
         
     }
     catch {
+        if ($ReturnOnly) {
+            return $null
+        }
         Write-Error "An error occurred while contacting the Gemini API: $($_.Exception.Message)"
         if ($_.Exception.Response) {
             $errorBody = $_.Exception.Response.GetResponseStream() | ForEach-Object { (New-Object System.IO.StreamReader($_)).ReadToEnd() }
             Write-Host "Error body: $errorBody" -ForegroundColor Red
         }
         return
+    }
+    
+    # --- ReturnOnly mode: just return the message ---
+    if ($ReturnOnly.IsPresent) {
+        return $suggestedMessage
     }
 
     # --- Display the suggested message ---
@@ -2230,39 +2299,103 @@ Please provide ONLY the commit message, without any explanations or additional t
         }
         Write-Host ""
         
-        # Prompt for action
-        Write-Host "What would you like to do?" -ForegroundColor Yellow
-        Write-Host "  Type 'commit' to commit with this message" -ForegroundColor White
-        Write-Host "  Press Enter (or any other input) to copy to clipboard" -ForegroundColor White
-        Write-Host ""
-        
-        $action = Read-Host "Your choice"
-        
-        if ($action -ceq 'commit') {
-            Write-Verbose "User chose to commit - executing git commit..."
-            try {
-                git commit -m $suggestedMessage
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Host "✓ Changes committed successfully!" -ForegroundColor Green
+        # Interactive loop with refinement capability
+        $continueLoop = $true
+        while ($continueLoop) {
+            # Prompt for action
+            Write-Host "What would you like to do?" -ForegroundColor Yellow
+            Write-Host "  Type 'commit' to commit with this message" -ForegroundColor White
+            Write-Host "  Press Enter to copy to clipboard" -ForegroundColor White
+            Write-Host "  Type anything else to refine the message with AI" -ForegroundColor White
+            Write-Host ""
+            
+            $action = Read-Host "Your choice"
+            
+            if ($action -ceq 'commit') {
+                # Commit with current message
+                Write-Verbose "User chose to commit - executing git commit..."
+                try {
+                    git commit -m $suggestedMessage
+                    if ($LASTEXITCODE -eq 0) {
+                        Write-Host "✓ Changes committed successfully!" -ForegroundColor Green
+                        $continueLoop = $false
+                    }
+                    else {
+                        Write-Error "Failed to commit changes."
+                        $continueLoop = $false
+                    }
                 }
-                else {
-                    Write-Error "Failed to commit changes."
+                catch {
+                    Write-Error "Error during commit: $($_.Exception.Message)"
+                    $continueLoop = $false
                 }
             }
-            catch {
-                Write-Error "Error during commit: $($_.Exception.Message)"
+            elseif ([string]::IsNullOrWhiteSpace($action)) {
+                # Copy to clipboard
+                Write-Verbose "User chose to copy to clipboard..."
+                try {
+                    Set-Clipboard -Value $suggestedMessage
+                    Write-Host "✓ Commit message copied to clipboard!" -ForegroundColor Green
+                    $continueLoop = $false
+                }
+                catch {
+                    Write-Warning "Failed to copy to clipboard. Here's the message to copy manually:"
+                    Write-Host $suggestedMessage -ForegroundColor White
+                    $continueLoop = $false
+                }
             }
-        }
-        else {
-            # Copy to clipboard
-            Write-Verbose "User chose to copy to clipboard..."
-            try {
-                Set-Clipboard -Value $suggestedMessage
-                Write-Host "✓ Commit message copied to clipboard!" -ForegroundColor Green
-            }
-            catch {
-                Write-Warning "Failed to copy to clipboard. Here's the message to copy manually:"
-                Write-Host $suggestedMessage -ForegroundColor White
+            else {
+                # Refine the message with AI
+                Write-Host "`nRefining commit message with your feedback..." -ForegroundColor Cyan
+                Write-Verbose "User provided refinement instructions: $action"
+                
+                # Build refinement prompt
+                $refinementPrompt = @"
+The user wants to refine the commit message. Their feedback is:
+"$action"
+
+Please generate an improved commit message based on this feedback while still:
+- Accurately describing the staged changes
+- Matching the language and style of previous commits
+- Being concise but descriptive
+
+Provide ONLY the refined commit message, without any explanations.
+"@
+                
+                try {
+                    # Call API with conversation history
+                    $refinedMessage = Invoke-GeminiForCommit -PromptText $refinementPrompt -History $chatHistory
+                    
+                    if ($null -ne $refinedMessage) {
+                        # Update message and history
+                        $suggestedMessage = $refinedMessage
+                        
+                        $chatHistory += @{
+                            role  = "user"
+                            parts = @(@{ text = $refinementPrompt })
+                        }
+                        $chatHistory += @{
+                            role  = "model"
+                            parts = @(@{ text = $refinedMessage })
+                        }
+                        
+                        # Display refined message
+                        Write-Host "`n" -NoNewline
+                        Write-Host "═══════════════════════════════════════════" -ForegroundColor Cyan
+                        Write-Host "Refined Commit Message:" -ForegroundColor Green
+                        Write-Host "═══════════════════════════════════════════" -ForegroundColor Cyan
+                        Write-Host $suggestedMessage -ForegroundColor White
+                        Write-Host "═══════════════════════════════════════════" -ForegroundColor Cyan
+                        Write-Host ""
+                    }
+                    else {
+                        Write-Warning "Failed to refine message. Keeping current message."
+                    }
+                }
+                catch {
+                    Write-Warning "Error during refinement: $($_.Exception.Message)"
+                    Write-Host "Keeping current message." -ForegroundColor Yellow
+                }
             }
         }
     }

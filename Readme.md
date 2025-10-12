@@ -262,6 +262,9 @@ Invoke-SuggestCommitMessage -InstructionsFile "commit-guidelines.txt"
 
 # Show detailed progress information
 Invoke-SuggestCommitMessage -Verbose
+
+# Get just the message for use in scripts/automation
+$commitMsg = Invoke-SuggestCommitMessage -ReturnOnly
 ```
 
 **Features:**
@@ -273,12 +276,17 @@ Invoke-SuggestCommitMessage -Verbose
 - 🎨 **Customizable**: Supports additional instructions and different AI models
 - 📋 **Shows staged files**: Displays files to be committed before taking action
 - 🔬 **Verbose mode**: Detailed progress tracking with -Verbose parameter
+- 🔄 **Message refinement**: Provide feedback to regenerate the message with AI
+- 🤖 **Scriptable**: Use -ReturnOnly for integration with other tools
 
 **Workflow:**
 1. Stage your changes: `git add .`
 2. Run: `sgcm`
 3. Review the AI-generated commit message
-4. Choose action: Type `commit` to commit or press Enter to copy to clipboard
+4. Choose action:
+   - Type `commit` to commit with the message
+   - Press Enter to copy to clipboard
+   - Type feedback to refine the message (e.g., "make it shorter", "add emoji")
 
 ## 🛠️ System Requirements
 
