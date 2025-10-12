@@ -2175,7 +2175,7 @@ Please provide ONLY the commit message, without any explanations or additional t
         
         $action = Read-Host "Your choice"
         
-        if ($action -eq 'C' -or $action -eq 'c' -or $action -eq 'commit') {
+        if ($action -eq 'C' -or $action -eq 'c') {
             try {
                 git commit -m $suggestedMessage
                 if ($LASTEXITCODE -eq 0) {
