@@ -1928,6 +1928,9 @@ exists and if there are staged changes before proceeding.
 
 The generated message matches the formatting, language, and style of previous commits.
 
+Before committing, the function displays the list of staged files to ensure you are aware
+of what will be committed.
+
 .PARAMETER CommitCount
 Number of previous commits to analyze for style and context. Defaults to 100.
 
@@ -1946,6 +1949,9 @@ Path to a file containing additional instructions for commit message generation.
 .PARAMETER ResetApiKey
 Forces the function to ask for a new API key, replacing the stored one.
 
+.PARAMETER Verbose
+Shows detailed information about what the function is doing at each step. Use -Verbose to enable.
+
 .EXAMPLE
 Invoke-SuggestCommitMessage
 # Generates a commit message based on staged changes and prompts for action
@@ -1963,11 +1969,15 @@ Invoke-SuggestCommitMessage -AdditionalInstructions "Use conventional commits fo
 # Adds specific instructions for message generation
 
 .EXAMPLE
+Invoke-SuggestCommitMessage -Verbose
+# Shows detailed progress information
+
+.EXAMPLE
 sgcm
 # Uses the alias to suggest a commit message
 #>
 function Invoke-SuggestCommitMessage {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess)]
     param(
         [int]$CommitCount = 100,
         
@@ -1983,12 +1993,14 @@ function Invoke-SuggestCommitMessage {
     )
 
     # --- Check if we're in a git repository ---
+    Write-Verbose "Checking if current directory is a git repository..."
     try {
         $gitCheck = git rev-parse --is-inside-work-tree 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Host "Error: Not in a git repository." -ForegroundColor Red
             return
         }
+        Write-Verbose "✓ Git repository detected"
     }
     catch {
         Write-Host "Error: Git is not available or not in a git repository." -ForegroundColor Red
@@ -1996,36 +2008,59 @@ function Invoke-SuggestCommitMessage {
     }
 
     # --- Check for staged changes ---
+    Write-Verbose "Checking for staged changes..."
     $stagedFiles = git diff --cached --name-only
     if ([string]::IsNullOrWhiteSpace($stagedFiles)) {
         Write-Host "Error: No staged changes found. Use 'git add' to stage files first." -ForegroundColor Yellow
         return
     }
+    
+    $stagedFilesArray = $stagedFiles -split "`n" | Where-Object { $_ }
+    Write-Verbose "✓ Found $($stagedFilesArray.Count) staged file(s)"
+    
+    if ($VerbosePreference -eq 'Continue') {
+        Write-Verbose "Staged files:"
+        foreach ($file in $stagedFilesArray) {
+            Write-Verbose "  - $file"
+        }
+    }
 
     Write-Host "Analyzing staged changes and commit history..." -ForegroundColor Cyan
 
     # --- Get branch name ---
+    Write-Verbose "Getting current branch name..."
     $branchName = git rev-parse --abbrev-ref HEAD 2>&1
     if ($LASTEXITCODE -ne 0) {
         $branchName = "unknown"
     }
+    Write-Verbose "✓ Branch: $branchName"
 
     # --- Get commit history ---
+    Write-Verbose "Fetching last $CommitCount commits for context..."
     $commitHistory = git --no-pager log --oneline -n $CommitCount 2>&1
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($commitHistory)) {
         $commitHistory = "No previous commits available (new repository)"
+        Write-Verbose "! No previous commits found (new repository)"
+    }
+    else {
+        $commitCount = ($commitHistory -split "`n").Count
+        Write-Verbose "✓ Retrieved $commitCount commit(s) for analysis"
     }
 
     # --- Get staged diff ---
+    Write-Verbose "Getting staged diff..."
     $stagedDiff = git diff --cached
     if ([string]::IsNullOrWhiteSpace($stagedDiff)) {
         Write-Host "Error: Unable to get staged diff." -ForegroundColor Red
         return
     }
+    Write-Verbose "✓ Staged diff retrieved successfully"
 
     # --- Load additional instructions from file if provided ---
+    Write-Verbose "Processing additional instructions..."
     $additionalInstructionsText = $AdditionalInstructions
     if (-not [string]::IsNullOrWhiteSpace($InstructionsFile)) {
+        Write-Verbose "Loading instructions from file: $InstructionsFile"
         if (Test-Path $InstructionsFile) {
             $fileContent = Get-Content -Path $InstructionsFile -Raw
             $additionalInstructionsText = if ([string]::IsNullOrWhiteSpace($additionalInstructionsText)) {
@@ -2033,6 +2068,7 @@ function Invoke-SuggestCommitMessage {
             } else {
                 "$additionalInstructionsText`n`n$fileContent"
             }
+            Write-Verbose "✓ Instructions loaded from file"
         }
         else {
             Write-Warning "Instructions file not found: $InstructionsFile"
@@ -2040,6 +2076,7 @@ function Invoke-SuggestCommitMessage {
     }
 
     # --- Get or Set API Key ---
+    Write-Verbose "Retrieving API key..."
     $apiKey = $null
     
     if ($ResetApiKey.IsPresent) {
@@ -2067,9 +2104,14 @@ function Invoke-SuggestCommitMessage {
         
         # Store the API key securely
         Set-SecureApiKey -ApiKey $apiKey -KeyName "GeminiAPI"
+        Write-Verbose "✓ API key stored securely"
+    }
+    else {
+        Write-Verbose "✓ API key retrieved successfully"
     }
 
     # --- Prepare the prompt for Gemini ---
+    Write-Verbose "Preparing prompt for Gemini AI..."
     $promptText = @"
 You are a git commit message expert. Your task is to analyze the provided information and generate a concise, meaningful commit message.
 
@@ -2096,9 +2138,12 @@ INSTRUCTIONS:
 $(if (-not [string]::IsNullOrWhiteSpace($additionalInstructionsText)) { "ADDITIONAL INSTRUCTIONS:`n$additionalInstructionsText`n" } else { "" })
 Please provide ONLY the commit message, without any explanations or additional text.
 "@
+    Write-Verbose "✓ Prompt prepared successfully"
 
     # --- API Setup ---
+    Write-Verbose "Setting up Gemini API connection..."
     $uri = "https://generativelanguage.googleapis.com/v1beta/models/$($Model):generateContent"
+    Write-Verbose "Using model: $Model"
     
     $headers = @{
         "Content-Type"   = "application/json"
@@ -2117,8 +2162,11 @@ Please provide ONLY the commit message, without any explanations or additional t
     # --- API Call ---
     try {
         Write-Host "Generating commit message with model '$Model'..." -ForegroundColor Cyan
+        Write-Verbose "Sending request to Gemini API..."
         
         $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -ContentType "application/json"
+        
+        Write-Verbose "✓ Response received from Gemini API"
         
         if ($null -eq $response.candidates) {
             Write-Error "The API did not return a valid response. The content may have been blocked."
@@ -2152,7 +2200,15 @@ Please provide ONLY the commit message, without any explanations or additional t
 
     # --- Handle user action ---
     if ($Force.IsPresent) {
+        # Show staged files before auto-commit
+        Write-Host "Staged files to be committed:" -ForegroundColor Yellow
+        foreach ($file in $stagedFilesArray) {
+            Write-Host "  • $file" -ForegroundColor Gray
+        }
+        Write-Host ""
+        
         # Auto-commit without prompting
+        Write-Verbose "Force mode enabled - committing automatically..."
         try {
             git commit -m $suggestedMessage
             if ($LASTEXITCODE -eq 0) {
@@ -2167,6 +2223,13 @@ Please provide ONLY the commit message, without any explanations or additional t
         }
     }
     else {
+        # Show staged files before prompting
+        Write-Host "Staged files to be committed:" -ForegroundColor Yellow
+        foreach ($file in $stagedFilesArray) {
+            Write-Host "  • $file" -ForegroundColor Gray
+        }
+        Write-Host ""
+        
         # Prompt for action
         Write-Host "What would you like to do?" -ForegroundColor Yellow
         Write-Host "  Type 'commit' to commit with this message" -ForegroundColor White
@@ -2176,6 +2239,7 @@ Please provide ONLY the commit message, without any explanations or additional t
         $action = Read-Host "Your choice"
         
         if ($action -ceq 'commit') {
+            Write-Verbose "User chose to commit - executing git commit..."
             try {
                 git commit -m $suggestedMessage
                 if ($LASTEXITCODE -eq 0) {
@@ -2191,6 +2255,7 @@ Please provide ONLY the commit message, without any explanations or additional t
         }
         else {
             # Copy to clipboard
+            Write-Verbose "User chose to copy to clipboard..."
             try {
                 Set-Clipboard -Value $suggestedMessage
                 Write-Host "✓ Commit message copied to clipboard!" -ForegroundColor Green

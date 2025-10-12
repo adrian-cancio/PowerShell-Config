@@ -259,6 +259,9 @@ Invoke-SuggestCommitMessage -AdditionalInstructions "Use conventional commits fo
 
 # Load instructions from a file
 Invoke-SuggestCommitMessage -InstructionsFile "commit-guidelines.txt"
+
+# Show detailed progress information
+Invoke-SuggestCommitMessage -Verbose
 ```
 
 **Features:**
@@ -268,6 +271,8 @@ Invoke-SuggestCommitMessage -InstructionsFile "commit-guidelines.txt"
 - 🎯 **Smart formatting**: Matches existing commit message patterns and conventions
 - ⚡ **Quick workflow**: Choose to commit immediately or copy to clipboard
 - 🎨 **Customizable**: Supports additional instructions and different AI models
+- 📋 **Shows staged files**: Displays files to be committed before taking action
+- 🔬 **Verbose mode**: Detailed progress tracking with -Verbose parameter
 
 **Workflow:**
 1. Stage your changes: `git add .`
