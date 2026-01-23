@@ -1562,7 +1562,7 @@ function Get-SecureApiKey {
             $secureString = ConvertTo-SecureString -String $encryptedString.Trim()
             
             $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureString)
-            $apiKey = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+            $apiKey = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($BSTR)
             [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
             
             return $apiKey
@@ -1728,8 +1728,9 @@ function Invoke-GeminiChat {
         $inputApiKey = Read-Host -AsSecureString
         
         # Convert secure string to plain text for this session
+        # Use PtrToStringBSTR for cross-platform compatibility (.NET Core/Linux)
         $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($inputApiKey)
-        $apiKey = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+        $apiKey = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($BSTR)
         [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
         
         if ([string]::IsNullOrEmpty($apiKey)) {
@@ -1892,8 +1893,20 @@ Remember: Terminal users value SPEED and CLARITY over detailed explanations. Mak
             Write-Host ""
             Write-Error "An error occurred while contacting the Gemini API: $($_.Exception.Message)"
             if ($_.Exception.Response) {
-                $errorBody = $_.Exception.Response.GetResponseStream() | ForEach-Object { (New-Object System.IO.StreamReader($_)).ReadToEnd() }
-                Write-Host "Error body: $errorBody" -ForegroundColor Red
+                try {
+                    # .NET Core / PowerShell 7+ uses HttpResponseMessage
+                    if ($_.Exception.Response -is [System.Net.Http.HttpResponseMessage]) {
+                        $errorBody = $_.Exception.Response.Content.ReadAsStringAsync().Result
+                    }
+                    else {
+                        # .NET Framework fallback
+                        $errorBody = $_.Exception.Response.GetResponseStream() | ForEach-Object { (New-Object System.IO.StreamReader($_)).ReadToEnd() }
+                    }
+                    Write-Host "Error body: $errorBody" -ForegroundColor Red
+                }
+                catch {
+                    Write-Host "Could not read error details from response." -ForegroundColor DarkYellow
+                }
             }
             break 
         }
@@ -2112,8 +2125,9 @@ function Invoke-SuggestCommitMessage {
         $inputApiKey = Read-Host -AsSecureString
         
         # Convert secure string to plain text for this session
+        # Use PtrToStringBSTR for cross-platform compatibility (.NET Core/Linux)
         $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($inputApiKey)
-        $apiKey = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+        $apiKey = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($BSTR)
         [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
         
         if ([string]::IsNullOrEmpty($apiKey)) {
@@ -2248,8 +2262,20 @@ Please provide ONLY the commit message, without any explanations or additional t
         }
         Write-Error "An error occurred while contacting the Gemini API: $($_.Exception.Message)"
         if ($_.Exception.Response) {
-            $errorBody = $_.Exception.Response.GetResponseStream() | ForEach-Object { (New-Object System.IO.StreamReader($_)).ReadToEnd() }
-            Write-Host "Error body: $errorBody" -ForegroundColor Red
+            try {
+                # .NET Core / PowerShell 7+ uses HttpResponseMessage
+                if ($_.Exception.Response -is [System.Net.Http.HttpResponseMessage]) {
+                    $errorBody = $_.Exception.Response.Content.ReadAsStringAsync().Result
+                }
+                else {
+                    # .NET Framework fallback
+                    $errorBody = $_.Exception.Response.GetResponseStream() | ForEach-Object { (New-Object System.IO.StreamReader($_)).ReadToEnd() }
+                }
+                Write-Host "Error body: $errorBody" -ForegroundColor Red
+            }
+            catch {
+                Write-Host "Could not read error details from response." -ForegroundColor DarkYellow
+            }
         }
         return
     }
