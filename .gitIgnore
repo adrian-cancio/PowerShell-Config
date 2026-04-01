@@ -5,3 +5,4 @@ Scripts
 
 powershell.config.json
 *.key
+%TEMP%/

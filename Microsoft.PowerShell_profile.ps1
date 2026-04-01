@@ -1664,6 +1664,13 @@ function Get-SecureApiKeyUnix {
     }
 }
 
+function Get-DefaultGeminiFlashModel {
+    [CmdletBinding()]
+    param()
+
+    return "gemini-flash-latest"
+}
+
 <#
 .SYNOPSIS
 Starts an interactive chat session with a Google Gemini model with PowerShell text formatting support.
@@ -1686,7 +1693,7 @@ The first question or message to start the conversation with the chatbot. If not
 the function will start with an interactive prompt.
 
 .PARAMETER Model
-The Gemini model to use. Defaults to 'gemini-2.5-flash'.
+The Gemini model to use. Defaults to the official 'gemini-flash-latest' alias.
 
 .PARAMETER ResetApiKey
 Forces the function to ask for a new API key, replacing the stored one.
@@ -1706,7 +1713,7 @@ function Invoke-GeminiChat {
     param(
         [string]$InitialPrompt = "",
 
-        [string]$Model = "gemini-2.5-flash",
+        [string]$Model = (Get-DefaultGeminiFlashModel),
         
         [switch]$ResetApiKey
     )
@@ -1741,9 +1748,6 @@ function Invoke-GeminiChat {
         Set-SecureApiKey -ApiKey $apiKey -KeyName "GeminiAPI"
     }
 
-    # --- Initial Setup ---
-    Write-Host "Starting chat with model '$Model' (PowerShell Formatting enabled). Type 'exit' or 'quit' to end." -ForegroundColor Cyan
-
     $uri = "https://generativelanguage.googleapis.com/v1beta/models/$($Model):generateContent"
     
     $headers = @{
@@ -1752,6 +1756,7 @@ function Invoke-GeminiChat {
     }
 
     $chatHistory = @()
+    $sessionHeaderShown = $false
 
     # --- SYSTEM INSTRUCTION ---
     # This key instruction tells the model how to behave and explains PowerShell formatting.
@@ -1878,6 +1883,24 @@ Remember: Terminal users value SPEED and CLARITY over detailed explanations. Mak
             Write-Host ""
             
             $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -ContentType "application/json"
+
+            if (-not $sessionHeaderShown) {
+                $effectiveModel = if (-not [string]::IsNullOrWhiteSpace($response.modelVersion)) {
+                    $response.modelVersion
+                }
+                else {
+                    $Model
+                }
+
+                $startMessage = "Starting chat with model '$effectiveModel' (PowerShell Formatting enabled). Type 'exit' or 'quit' to end."
+                if ($effectiveModel -ne $Model) {
+                    $startMessage += " [alias: '$Model']"
+                }
+
+                Write-Host $startMessage -ForegroundColor Cyan
+                Write-Host ""
+                $sessionHeaderShown = $true
+            }
             
             if ($null -eq $response.candidates) {
                 Write-Warning "The API did not return a valid response. The content may have been blocked."
@@ -1936,7 +1959,7 @@ the list of staged files to ensure you are aware of what will be committed.
 Number of previous commits to analyze for style and context. Defaults to 100.
 
 .PARAMETER Model
-The Gemini model to use for generating the commit message. Defaults to 'gemini-2.5-flash'.
+The Gemini model to use for generating the commit message. Defaults to the official 'gemini-flash-latest' alias.
 
 .PARAMETER Force
 If specified, automatically commits with the suggested message without prompting for confirmation.
@@ -1962,7 +1985,7 @@ Invoke-SuggestCommitMessage
 # Generates a commit message, allows refinement, and prompts for action
 
 .EXAMPLE
-Invoke-SuggestCommitMessage -CommitCount 50 -Model "gemini-2.5-flash"
+Invoke-SuggestCommitMessage -CommitCount 50 -Model "gemini-flash-latest"
 # Uses the last 50 commits and specified model
 
 .EXAMPLE
@@ -1990,7 +2013,7 @@ function Invoke-SuggestCommitMessage {
     param(
         [int]$CommitCount = 100,
         
-        [string]$Model = "gemini-2.5-flash",
+        [string]$Model = (Get-DefaultGeminiFlashModel),
         
         [switch]$Force,
         
@@ -2172,6 +2195,7 @@ Please provide ONLY the commit message, without any explanations or additional t
 
     # --- API Call ---
     $chatHistory = @()
+    $resolvedModelVersion = $null
     
     # Function to call Gemini API (reusable for refinements)
     function Invoke-GeminiForCommit {
@@ -2197,12 +2221,12 @@ Please provide ONLY the commit message, without any explanations or additional t
             contents = $bodyContents
         } | ConvertTo-Json -Depth 10
         
-        if (-not $ReturnOnly) {
-            Write-Host "Generating commit message with model '$Model'..." -ForegroundColor Cyan
-        }
         Write-Verbose "Sending request to Gemini API..."
         
         $apiResponse = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $requestBody -ContentType "application/json"
+        if ([string]::IsNullOrWhiteSpace($resolvedModelVersion) -and -not [string]::IsNullOrWhiteSpace($apiResponse.modelVersion)) {
+            Set-Variable -Name resolvedModelVersion -Value $apiResponse.modelVersion -Scope 1
+        }
         
         Write-Verbose "✓ Response received from Gemini API"
         
@@ -2226,6 +2250,22 @@ Please provide ONLY the commit message, without any explanations or additional t
     # Initial API call
     try {
         $suggestedMessage = Invoke-GeminiForCommit -PromptText $promptText -History $chatHistory
+
+        if (-not $ReturnOnly) {
+            $effectiveModel = if (-not [string]::IsNullOrWhiteSpace($resolvedModelVersion)) {
+                $resolvedModelVersion
+            }
+            else {
+                $Model
+            }
+
+            $statusMessage = "Generating commit message with model '$effectiveModel'..."
+            if ($effectiveModel -ne $Model) {
+                $statusMessage += " [alias: '$Model']"
+            }
+
+            Write-Host $statusMessage -ForegroundColor Cyan
+        }
         
         if ($null -eq $suggestedMessage) {
             return

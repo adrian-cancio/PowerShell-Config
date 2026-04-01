@@ -90,9 +90,10 @@ gemini "how to find large files in PowerShell"
 # Suggest commit message based on staged changes
 sgcm  # or Invoke-SuggestCommitMessage
 # Analyzes staged changes and previous commits to generate a commit message
+# By default, uses the official gemini-flash-latest alias
 
 # Use with custom options
-Invoke-SuggestCommitMessage -CommitCount 50 -Model "gemini-2.5-flash"
+Invoke-SuggestCommitMessage -CommitCount 50 -Model "gemini-flash-latest"
 Invoke-SuggestCommitMessage -Force  # Auto-commit without prompting
 Invoke-SuggestCommitMessage -AdditionalInstructions "Use conventional commits format"
 
@@ -247,9 +248,10 @@ Invoke-SuggestCommitMessage
 
 # Customize the number of previous commits to analyze (default: 100)
 Invoke-SuggestCommitMessage -CommitCount 50
+# By default, uses the official gemini-flash-latest alias
 
 # Use a specific Gemini model
-Invoke-SuggestCommitMessage -Model "gemini-2.5-flash"
+Invoke-SuggestCommitMessage -Model "gemini-flash-latest"
 
 # Auto-commit without prompting for confirmation
 Invoke-SuggestCommitMessage -Force
