@@ -107,16 +107,18 @@ ghce "Get-ChildItem -Recurse | Where-Object {$_.Length -gt 100MB}"
 ### Mathematical Functions
 
 ```powershell
-# Use mathematical constants
-$PI
-$E
-
 # Calculate trigonometric functions
 Get-Sin 1.5708  # π/2
 Get-Cos 0       # 1
 Get-Sqrt 16     # 4
 Get-Pow 2 3     # 8
+
+# Constants are available straight from .NET
+[Math]::PI
+[Math]::E
 ```
+
+The math functions live in `Profile/Math.psm1` and can be disabled with `"Microsoft.PowerShell.Profile:EnableMathModule": false`.
 
 ### Pip Wrapper Functions
 
@@ -156,6 +158,19 @@ The wrapper detects virtual environments by checking:
 
 ### Prompt Customization
 
+The prompt is two lines. An OS icon (`⊞` Windows, `λ` Linux, `⌘` macOS) comes first, then `user@hostname` and the current path. The second line holds the git status and the prompt marker:
+
+```
+⊞ ||Cancio@CANTHIN|-|~\Code\project|| ✗1 3.2s
+|main ↑2↓1 +1 ~3 ?2 $1|>
+```
+
+- `✗N` appears when the last command failed (with its exit code when it is a native command).
+- The duration appears only when the last command took longer than `PromptMinDurationSeconds`.
+- Git status: `↑` ahead, `↓` behind, `+` staged, `~` modified, `?` untracked, `!` conflicts, `$` stashes, `✓` clean. A detached HEAD shows `:abc1234`.
+- Git status is skipped on network/UNC paths, cached for a few seconds, and replaced by `…` if `git status` exceeds `GitPromptTimeoutMs`.
+- The `Random` scheme picks new colors on every prompt.
+
 Available color schemes:
 - `Default`, `Blue`, `Green`, `Cyan`, `Red`, `Magenta`, `Yellow`, `Gray`
 - `Random`, `Asturias`, `Spain`, `Hackerman`
@@ -180,7 +195,15 @@ The profile uses a JSON configuration file (`powershell.config.json`) for settin
     "Microsoft.PowerShell.Profile:DefaultPrompt": false,
     "Microsoft.PowerShell.Profile:AskCreateCodeFolder": true,
     "Microsoft.PowerShell.Profile:CodeFolderName": "Code",
-    "Microsoft.PowerShell.Profile:EnableRandomTitle": false
+    "Microsoft.PowerShell.Profile:EnableRandomTitle": false,
+    "Microsoft.PowerShell.Profile:EnableMathModule": true,
+    "Microsoft.PowerShell.Profile:GitPrompt": true,
+    "Microsoft.PowerShell.Profile:GitPromptTimeoutMs": 1500,
+    "Microsoft.PowerShell.Profile:PromptMinDurationSeconds": 2,
+    "Microsoft.PowerShell.Profile:PredictionViewStyle": "ListView",
+    "Microsoft.PowerShell.Profile:PredictionMode": "OnDemand",
+    "Microsoft.PowerShell.Profile:PredictionToggleKey": "Ctrl+Alt+p",
+    "Microsoft.PowerShell.Profile:EnableZoxide": true
 }
 ```
 
@@ -190,9 +213,54 @@ The profile uses a JSON configuration file (`powershell.config.json`) for settin
 |---------|-------------|---------|
 | `PromptColorScheme` | Color scheme for the prompt | `"Default"` |
 | `DefaultPrompt` | Use standard PowerShell prompt | `false` |
-| `AskCreateCodeFolder` | Prompt to create Code folder | `true` |
+| `AskCreateCodeFolder` | Prompt to create Code folder (interactive sessions only) | `true` |
 | `CodeFolderName` | Name of the code directory | `"Code"` |
 | `EnableRandomTitle` | Enable randomized window titles | `false` |
+| `EnableMathModule` | Load the optional math functions | `true` |
+| `GitPrompt` | Show git branch and status in the prompt | `true` |
+| `GitPromptTimeoutMs` | Max wait for `git status` before showing `…` | `1500` |
+| `PromptMinDurationSeconds` | Show last command duration above this threshold | `2` |
+| `PredictionViewStyle` | PSReadLine predictions: `ListView` or `InlineView` | `"ListView"` |
+| `PredictionMode` | `OnDemand`, `Always` or `Off` | `"OnDemand"` |
+| `PredictionToggleKey` | Key that shows/hides suggestions in `OnDemand` mode | `"Ctrl+Alt+p"` |
+| `EnableZoxide` | Initialize zoxide when installed | `true` |
+
+### Profile Layout
+
+`Microsoft.PowerShell_profile.ps1` is a short loader. The code lives in `Profile/`:
+
+| File | Contents |
+|------|----------|
+| `Settings.ps1` | Settings file handling, OS detection, `Code` folder |
+| `Common.ps1` | Shared helpers (fast executable lookup, data directory) |
+| `Git.ps1`, `Prompt.ps1` | Git status and the prompt |
+| `Readline.ps1` | PSReadLine predictions, history search, secret-aware history |
+| `Utilities.ps1` | Weather, IP, disk space, directory tree |
+| `Shortcuts.ps1` | Navigation and git shortcuts, zoxide |
+| `Pip.ps1`, `Copilot.ps1` | pip wrappers, `ghcs`/`ghce` |
+| `SecureApiKey.ps1`, `Gemini*.ps1` | API key storage and Gemini tools |
+| `Completions.ps1` | Tab completion for `git`, `gh` and `cdc` |
+| `Diagnostics.ps1` | `Show-ProfileInfo` |
+| `Math.psm1` | Optional math functions |
+
+### Shortcuts
+
+| Command | Action |
+|---------|--------|
+| `..`, `...`, `....` | Go up one, two or three folders |
+| `mkcd <path>` | Create a folder and enter it |
+| `cdc [project]` | Jump to your `Code` folder (tab-completes projects) |
+| `gst`, `gd`, `gds` | `git status -sb`, `git diff`, `git diff --staged` |
+| `ga`, `gaa`, `gcmsg <msg>` | `git add`, `git add --all`, `git commit -m` |
+| `gco`, `gsw`, `gpull`, `gpush` | `git checkout`, `switch`, `pull`, `push` |
+| `glog` | Compact graph of the last 20 commits |
+| `gundo` | Undo the last commit, keeping its changes staged |
+| `Show-ProfileInfo` | PowerShell version, load time per part, missing tools |
+| `Update-ProfileCompletions` | Refresh the cached `gh` completion script |
+
+History suggestions are hidden by default so they never expose old commands on screen. Press `Ctrl+Alt+P` (configurable with `PredictionToggleKey`) to show or hide them; they also hide by themselves on `Enter` and `Esc`. Set `PredictionMode` to `Always` to keep them visible. Up/Down still search the history by what you have typed.
+
+Command history skips lines that look like they contain secrets (passwords, tokens, API keys). They stay available in the current session but are not written to the history file.
 
 ## 🔧 Advanced Features
 
@@ -211,6 +279,10 @@ $apiKey = Get-SecureApiKey -KeyName "GeminiAPI"
 **Storage Methods:**
 - **Windows**: DPAPI (Data Protection API)
 - **Linux/macOS**: OpenSSL encryption with user-specific keys
+
+Keys are stored in `~/.powershell-secrets/`, outside the profile folder. A key found in the old location (next to the profile) is moved there automatically on first use.
+
+`ghcs` always shows the suggested command, flags risky ones, and asks for confirmation before running it.
 
 ### Code Safety Features
 
