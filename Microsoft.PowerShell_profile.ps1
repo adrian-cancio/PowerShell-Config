@@ -107,6 +107,9 @@ if ($IsWindows) {
     $env:USER = $env:USERNAME
 }
 
+$HostName = [Environment]::MachineName
+$OsIcon = @{ Windows = "⊞"; Linux = "λ"; MacOS = "⌘" }[$Kernel.ToString()]
+
 [String]$SPWD
 $DirArray = @()
 
@@ -186,7 +189,7 @@ function Set-PromptColorScheme {
         [PromptColorSchemes]::Hackerman = @($Colors["Green"][0], $Colors["Gray"][1])
     }
 
-    $Global:PromptColors = $ColorSchemes[$ColorScheme]    
+    $Global:PromptColors = $ColorSchemes[$ColorScheme]
     $Global:UserSettings["Microsoft.PowerShell.Profile:PromptColorScheme"] = $ColorScheme.toString()
 }
 
@@ -223,6 +226,66 @@ function Set-RandomPowerShellTitle {
 $DefaultPrompt = $Global:UserSettings["Microsoft.PowerShell.Profile:DefaultPrompt"]
 
 # ----------------------------------
+# Git status for the prompt
+# Returns $null outside a repository.
+# ----------------------------------
+function Get-GitPromptInfo {
+    if ($null -eq $Global:GitAvailable) {
+        $Global:GitAvailable = [bool](Get-Command git -CommandType Application -ErrorAction SilentlyContinue)
+    }
+    if (!$Global:GitAvailable -or $PWD.Provider.Name -ne "FileSystem") {
+        return $null
+    }
+
+    $InRepo = $false
+    for ($Dir = $PWD.ProviderPath; $Dir; $Dir = Split-Path -Path $Dir -Parent) {
+        if (Test-Path -LiteralPath (Join-Path $Dir ".git")) {
+            $InRepo = $true
+            break
+        }
+    }
+    if (!$InRepo) {
+        return $null
+    }
+
+    $SavedExitCode = $global:LASTEXITCODE
+    $Lines = git --no-optional-locks status --porcelain=v2 --branch --show-stash 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        $Lines = git --no-optional-locks status --porcelain=v2 --branch 2>$null
+    }
+    $Failed = $LASTEXITCODE -ne 0
+    $global:LASTEXITCODE = $SavedExitCode
+    if ($Failed -or !$Lines) {
+        return $null
+    }
+
+    $Info = @{ Branch = ""; Ahead = 0; Behind = 0; Staged = 0; Modified = 0; Untracked = 0; Conflicts = 0; Stash = 0 }
+    $Oid = ""
+    foreach ($Line in $Lines) {
+        if ($Line.StartsWith("# branch.head ")) { $Info.Branch = $Line.Substring(14) }
+        elseif ($Line.StartsWith("# branch.oid ")) { $Oid = $Line.Substring(13) }
+        elseif ($Line.StartsWith("# branch.ab ")) {
+            if ($Line -match '\+(\d+) -(\d+)') {
+                $Info.Ahead = [int]$Matches[1]
+                $Info.Behind = [int]$Matches[2]
+            }
+        }
+        elseif ($Line.StartsWith("# stash ")) { $Info.Stash = [int]$Line.Substring(8) }
+        elseif ($Line.StartsWith("1 ") -or $Line.StartsWith("2 ")) {
+            if ($Line[2] -ne ".") { $Info.Staged++ }
+            if ($Line[3] -ne ".") { $Info.Modified++ }
+        }
+        elseif ($Line.StartsWith("u ")) { $Info.Conflicts++ }
+        elseif ($Line.StartsWith("? ")) { $Info.Untracked++ }
+    }
+
+    if ($Info.Branch -eq "(detached)") {
+        $Info.Branch = ":" + $Oid.Substring(0, [Math]::Min(7, $Oid.Length))
+    }
+    return $Info
+}
+
+# ----------------------------------
 # Custom Prompt
 # ----------------------------------
 function Prompt() {
@@ -239,9 +302,10 @@ function Prompt() {
     Set-PromptColorScheme -ColorScheme $Global:UserSettings["Microsoft.PowerShell.Profile:PromptColorScheme"]
 
     Write-Host "||" -NoNewline -ForegroundColor $PromptColors[1]
+    Write-Host "$OsIcon " -NoNewline -ForegroundColor $PromptColors[1]
     Write-Host $env:USER -NoNewline -ForegroundColor $PromptColors[0]
     Write-Host "@" -NoNewline -ForegroundColor $PromptColors[1]
-    Write-Host $Kernel -NoNewline -ForegroundColor $PromptColors[0]
+    Write-Host $HostName -NoNewline -ForegroundColor $PromptColors[0]
     Write-Host "|-|" -NoNewline -ForegroundColor $PromptColors[1]
 
     $SPWD = if ($PWD.Path.StartsWith($HOME)) {
@@ -265,6 +329,35 @@ function Prompt() {
     }
 
     Write-Host "||`n" -NoNewline -ForegroundColor $PromptColors[1]
+    $Git = Get-GitPromptInfo
+    if ($Git) {
+        Write-Host "|" -NoNewline -ForegroundColor $PromptColors[1]
+        Write-Host $Git.Branch -NoNewline -ForegroundColor $PromptColors[0]
+
+        if ($Git.Ahead -or $Git.Behind) {
+            Write-Host " " -NoNewline
+            if ($Git.Ahead) { Write-Host "↑$($Git.Ahead)" -NoNewline -ForegroundColor Green }
+            if ($Git.Behind) { Write-Host "↓$($Git.Behind)" -NoNewline -ForegroundColor Red }
+        }
+
+        $Flags = @(
+            @{ Text = "+$($Git.Staged)"; Count = $Git.Staged; Color = "Green" }
+            @{ Text = "~$($Git.Modified)"; Count = $Git.Modified; Color = "Yellow" }
+            @{ Text = "?$($Git.Untracked)"; Count = $Git.Untracked; Color = "Gray" }
+            @{ Text = "!$($Git.Conflicts)"; Count = $Git.Conflicts; Color = "Red" }
+            @{ Text = "`$$($Git.Stash)"; Count = $Git.Stash; Color = "Cyan" }
+        )
+        $HasChanges = $false
+        foreach ($Flag in $Flags) {
+            if ($Flag.Count -gt 0) {
+                Write-Host " $($Flag.Text)" -NoNewline -ForegroundColor $Flag.Color
+                $HasChanges = $true
+            }
+        }
+        if (!$HasChanges) {
+            Write-Host " ✓" -NoNewline -ForegroundColor Green
+        }
+    }
     Write-Host $("|>" * ($NestedPromptLevel + 1)) -NoNewline -ForegroundColor $PromptColors[1]
     return " "
 }
@@ -370,7 +463,7 @@ function Stop-ProcessConstantly {
 Displays a directory tree structure in the console.
 
 .DESCRIPTION
-The `Show-DirectoryTree` function recursively lists the contents of a directory in a tree-like format. 
+The `Show-DirectoryTree` function recursively lists the contents of a directory in a tree-like format.
 It supports displaying both folders and files, with options to customize recursion depth and respect `.gitignore` rules.
 
 .PARAMETER Path
@@ -588,7 +681,7 @@ Retrieves the content of all files in the "C:\Projects" directory and its subdir
 - Additional ignore patterns can be specified using the `AdditionalIgnore` parameter.
 - The function supports syntax highlighting for various file types when `UseMarkdownFence` is enabled, based on file extensions.
 
-#> 
+#>
 
 function Get-ContentRecursiveIgnore {
     [CmdletBinding()]
@@ -604,7 +697,7 @@ function Get-ContentRecursiveIgnore {
         return
     }
 
-    
+
 
     # Show the directory tree before processing file contents
     Show-DirectoryTree -Path $Path -IncludeFiles -RespectGitIgnore -AdditionalIgnore $AdditionalIgnore
@@ -737,7 +830,7 @@ foreach ($dir in $pathDirs) {
         if ($pipExe -and -not $Global:OriginalPipPath) {
             $Global:OriginalPipPath = Join-Path $dir $pipExe
         }
-        
+
         $pip3Exe = Get-ChildItem -Path $dir -Name "pip3.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($pip3Exe -and -not $Global:OriginalPip3Path) {
             $Global:OriginalPip3Path = Join-Path $dir $pip3Exe
@@ -779,7 +872,7 @@ function Invoke-PipWrapper {
     # If this is an install command and we're not in a virtual environment, show warning
     if ($args -and $args[0] -eq "install" -and -not $env:VIRTUAL_ENV -and -not $env:CONDA_DEFAULT_ENV) {
         $hasGlobalFlag = $args -contains "--global"
-        
+
         if (-not $hasGlobalFlag) {
             Write-Host ""
             Write-Host "⚠️  WARNING: Installing packages globally (not in virtual environment)." -ForegroundColor Yellow
@@ -792,7 +885,7 @@ function Invoke-PipWrapper {
             Write-Host "Press Enter to continue or Ctrl+C to cancel."
             $null = Read-Host
         }
-        
+
         # Remove custom --global flag
         $cleanArgs = $args | Where-Object { $_ -ne "--global" }
         & $Global:OriginalPipPath @cleanArgs
@@ -811,7 +904,7 @@ function Invoke-Pip3Wrapper {
     # If this is an install command and we're not in a virtual environment, show warning
     if ($args -and $args[0] -eq "install" -and -not $env:VIRTUAL_ENV -and -not $env:CONDA_DEFAULT_ENV) {
         $hasGlobalFlag = $args -contains "--global"
-        
+
         if (-not $hasGlobalFlag) {
             Write-Host ""
             Write-Host "⚠️  WARNING: Installing packages globally (not in virtual environment)." -ForegroundColor Yellow
@@ -824,7 +917,7 @@ function Invoke-Pip3Wrapper {
             Write-Host "Press Enter to continue or Ctrl+C to cancel."
             $null = Read-Host
         }
-        
+
         # Remove custom --global flag
         $cleanArgs = $args | Where-Object { $_ -ne "--global" }
         & $Global:OriginalPip3Path @cleanArgs
@@ -841,7 +934,7 @@ Set-Alias -Name gvim -Value vim
 Set-Alias -Name wrh -Value Write-Host
 Set-Alias -Name cpwd -Value Set-PWDClipboard
 Set-Alias -Name tree -Value Show-DirectoryTree
-Set-Alias -Name gemini -Value Invoke-GeminiChat
+Set-Alias -Name gemini-chat -Value Invoke-GeminiChat
 Set-Alias -Name sgcm -Value Invoke-SuggestCommitMessage
 
 # Create aliases only if the original commands exist
@@ -1049,7 +1142,7 @@ function Test-PowerShellCodeRisk {
         [Parameter(Mandatory = $true)]
         [string]$Code
     )
-    
+
     # Define risky command patterns (cross-platform)
     $riskyPatterns = @(
         # File system operations
@@ -1062,43 +1155,43 @@ function Test-PowerShellCodeRisk {
         '(Add-Content|>>)',
         '>\s*[^|]',  # Redirection to file (not pipe)
         '>\s*\$',    # Redirection to end of line
-        
+
         # Registry operations (Windows)
         '(New-ItemProperty|Set-ItemProperty|Remove-ItemProperty)',
         '(New-PSDrive|Remove-PSDrive)',
         'HKEY_|HKLM:|HKCU:|Registry::',
-        
+
         # Service and process management
         '(Start-Service|Stop-Service|Restart-Service)',
         '(Start-Process|Stop-Process|Kill)',
         '(Get-Service|Set-Service)',
-        
+
         # Network operations
         '(Invoke-WebRequest|Invoke-RestMethod|wget|curl)',
         '(Start-Job|Receive-Job)',
         '(Enter-PSSession|New-PSSession)',
-        
+
         # User and security management
         '(New-LocalUser|Remove-LocalUser|Set-LocalUser)',
         '(Add-LocalGroupMember|Remove-LocalGroupMember)',
         '(Set-ExecutionPolicy)',
         '(Import-Module.*-Force)',
-        
+
         # System configuration
         '(Set-ItemProperty.*-Path.*HKLM)',
         '(Set-Location.*System32|Set-Location.*Windows)',
         '(Start-Sleep\s+\d{4,})', # Very long sleeps
-        
+
         # Dangerous cmdlets
         '(Invoke-Expression|iex)',
         '(Invoke-Command)',
         '(Start-Transcript|Stop-Transcript)',
-        
+
         # File downloads or execution
         '(DownloadString|DownloadFile)',
         '(Start-BitsTransfer)',
         '\.exe\s|\.msi\s|\.bat\s|\.cmd\s',
-        
+
         # Unix/Linux specific dangerous operations
         '(sudo|su\s)',
         '(chmod\s+[0-7]{3,4})',
@@ -1112,31 +1205,31 @@ function Test-PowerShellCodeRisk {
         '(crontab|at\s)',
         '(iptables|ufw)',
         '(ssh-keygen|ssh-copy-id)',
-        
+
         # Package management (risky installations)
         '(apt|yum|dnf|brew|pip|npm).*install',
         '(dpkg|rpm).*-i',
-        
+
         # macOS specific operations
         '(launchctl)',
         '(dscl|dseditgroup)',
         '(csrutil|spctl)',
         '(diskutil)',
-        
+
         # Shell execution patterns
         '(bash|sh|zsh|fish).*-c',
         '(/bin/|/usr/bin/)',
         '&\s*$',  # Background execution
         ';\s*(rm|del)'  # Command chaining with deletion
     )
-    
+
     # Check for risky patterns
     foreach ($pattern in $riskyPatterns) {
         if ($Code -match $pattern) {
             return $true
         }
     }
-    
+
     # Check for file paths that could be system critical (cross-platform)
     $systemPaths = @(
         # Windows critical paths
@@ -1147,7 +1240,7 @@ function Test-PowerShellCodeRisk {
         '\$env:PROGRAMFILES',
         '\$env:PROGRAMDATA',
         '\$env:SYSTEMROOT',
-        
+
         # Linux/Unix critical paths
         '/etc/',
         '/bin/',
@@ -1166,7 +1259,7 @@ function Test-PowerShellCodeRisk {
         '/opt/',
         '\$HOME/\.config',
         '\$HOME/\.local',
-        
+
         # macOS specific paths
         '/System/',
         '/Library/',
@@ -1176,13 +1269,13 @@ function Test-PowerShellCodeRisk {
         '/usr/local/',
         '\$HOME/Library/'
     )
-    
+
     foreach ($path in $systemPaths) {
         if ($Code -match $path) {
             return $true
         }
     }
-    
+
     return $false
 }
 
@@ -1208,10 +1301,10 @@ function Invoke-SafePowerShellCode {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Code,
-        
+
         [switch]$AutoApprove
     )
-    
+
     $result = [PSCustomObject]@{
         ExecutionResult = $null
         Output = ""
@@ -1220,20 +1313,20 @@ function Invoke-SafePowerShellCode {
         UserApproved = $false
         Executed = $false
     }
-    
+
     # Clean the code (remove code block markers if present)
     $cleanCode = $Code -replace '^```(?:powershell|ps1)?\s*', '' -replace '```\s*$', ''
     $cleanCode = $cleanCode.Trim()
-    
+
     if ([string]::IsNullOrWhiteSpace($cleanCode)) {
         $result.Error = "No code provided to execute"
         return $result
     }
-    
+
     # Analyze code for risks
     $isRisky = Test-PowerShellCodeRisk -Code $cleanCode
     $result.WasRisky = $isRisky
-    
+
     # If risky and not auto-approved, ask for confirmation
     if ($isRisky -and -not $AutoApprove.IsPresent) {
         Write-Host "`n" -NoNewline
@@ -1242,11 +1335,11 @@ function Invoke-SafePowerShellCode {
         Write-Host "`n--- CODE TO EXECUTE ---" -ForegroundColor Cyan
         Write-Host $cleanCode -ForegroundColor Gray
         Write-Host "--- END CODE ---`n" -ForegroundColor Cyan
-        
+
         do {
             $confirmation = Read-Host "Do you want to execute this code? (y/N/s=show again)"
             $confirmation = $confirmation.ToLower()
-            
+
             if ($confirmation -eq 's') {
                 Write-Host "`n--- CODE TO EXECUTE ---" -ForegroundColor Cyan
                 Write-Host $cleanCode -ForegroundColor Gray
@@ -1254,38 +1347,38 @@ function Invoke-SafePowerShellCode {
                 continue
             }
         } while ($confirmation -eq 's')
-        
+
         if ($confirmation -ne 'y' -and $confirmation -ne 'yes') {
             $result.Error = "Code execution cancelled by user"
             return $result
         }
-        
+
         $result.UserApproved = $true
     }
-    
+
     # Execute the code
     try {
         $result.Executed = $true
-        
+
         # Capture both output and errors
         $scriptBlock = [ScriptBlock]::Create($cleanCode)
         $job = Start-Job -ScriptBlock $scriptBlock
-        
+
         # Wait for job completion with timeout (30 seconds)
         $timeoutSeconds = 30
         $job | Wait-Job -Timeout $timeoutSeconds | Out-Null
-        
+
         if ($job.State -eq 'Running') {
             $job | Stop-Job
             $result.Error = "Code execution timed out after $timeoutSeconds seconds"
         }
         elseif ($job.State -eq 'Completed') {
             $output = Receive-Job -Job $job 2>&1
-            
+
             # Separate output and errors
             $outputLines = @()
             $errorLines = @()
-            
+
             foreach ($item in $output) {
                 if ($item -is [System.Management.Automation.ErrorRecord]) {
                     $errorLines += $item.ToString()
@@ -1294,7 +1387,7 @@ function Invoke-SafePowerShellCode {
                     $outputLines += $item.ToString()
                 }
             }
-            
+
             $result.Output = ($outputLines -join "`n").Trim()
             $result.Error = ($errorLines -join "`n").Trim()
             $result.ExecutionResult = "Success"
@@ -1303,7 +1396,7 @@ function Invoke-SafePowerShellCode {
             $result.Error = "Code execution failed with state: $($job.State)"
             $result.ExecutionResult = "Failed"
         }
-        
+
         # Clean up the job
         Remove-Job -Job $job -Force
     }
@@ -1311,7 +1404,7 @@ function Invoke-SafePowerShellCode {
         $result.Error = "Execution error: $($_.Exception.Message)"
         $result.ExecutionResult = "Error"
     }
-    
+
     return $result
 }
 
@@ -1335,28 +1428,28 @@ function Format-GeminiText {
         [Parameter(Mandatory = $true)]
         [string]$Text
     )
-    
+
     # Split text by format commands while preserving the commands
     $parts = $Text -split '(\[(?:FG|BG|STYLE):[^\]]+\]|\[/(?:FG|BG|STYLE)\])'
-    
+
     $currentFG = $null
     $currentBG = $null
     $currentStyle = @()
-    
+
     foreach ($part in $parts) {
         if ([string]::IsNullOrEmpty($part)) { continue }
-        
+
         # Check if this part is a format command
         if ($part -match '^\[(\w+):([^\]]+)\]$') {
             $command = $matches[1]
             $value = $matches[2]
-            
+
             switch ($command) {
-                "FG" { 
-                    $currentFG = $value 
+                "FG" {
+                    $currentFG = $value
                 }
-                "BG" { 
-                    $currentBG = $value 
+                "BG" {
+                    $currentBG = $value
                 }
                 "STYLE" {
                     if ($value -notin $currentStyle) {
@@ -1367,7 +1460,7 @@ function Format-GeminiText {
         }
         elseif ($part -match '^\[/(\w+)\]$') {
             $command = $matches[1]
-            
+
             switch ($command) {
                 "FG" { $currentFG = $null }
                 "BG" { $currentBG = $null }
@@ -1380,7 +1473,7 @@ function Format-GeminiText {
                 Object    = $part
                 NoNewline = $true
             }
-            
+
             if ($currentFG) {
                 try {
                     $writeParams.ForegroundColor = [ConsoleColor]$currentFG
@@ -1389,7 +1482,7 @@ function Format-GeminiText {
                     # If color name is invalid, ignore it
                 }
             }
-            
+
             if ($currentBG) {
                 try {
                     $writeParams.BackgroundColor = [ConsoleColor]$currentBG
@@ -1398,7 +1491,7 @@ function Format-GeminiText {
                     # If color name is invalid, ignore it
                 }
             }
-            
+
             Write-Host @writeParams
         }
     }
@@ -1425,10 +1518,10 @@ function Set-SecureApiKey {
     param(
         [Parameter(Mandatory = $true)]
         [string]$ApiKey,
-        
+
         [string]$KeyName = "GeminiAPI"
     )
-    
+
     try {
         if ($IsWindows) {
             # Windows: Use DPAPI
@@ -1443,7 +1536,7 @@ function Set-SecureApiKey {
             try {
                 $serviceName = "PowerShell-Profile-$KeyName"
                 $accountName = $env:USER
-                
+
                 # Store in macOS Keychain
                 $process = Start-Process -FilePath "security" -ArgumentList @(
                     "add-generic-password",
@@ -1452,7 +1545,7 @@ function Set-SecureApiKey {
                     "-w", $ApiKey,
                     "-U"
                 ) -Wait -PassThru -NoNewWindow
-                
+
                 if ($process.ExitCode -eq 0) {
                     Write-Host "API key stored securely in macOS Keychain" -ForegroundColor Green
                     return
@@ -1461,7 +1554,7 @@ function Set-SecureApiKey {
             catch {
                 Write-Warning "Failed to use macOS Keychain, falling back to file encryption"
             }
-            
+
             # Fallback: File-based encryption for macOS
             Set-SecureApiKeyUnix -ApiKey $ApiKey -KeyName $KeyName
         }
@@ -1490,35 +1583,35 @@ function Set-SecureApiKeyUnix {
     param(
         [Parameter(Mandatory = $true)]
         [string]$ApiKey,
-        
+
         [string]$KeyName = "GeminiAPI"
     )
-    
+
     # Check if openssl is available
     $opensslPath = Get-Command openssl -ErrorAction SilentlyContinue
     if (-not $opensslPath) {
         Write-Error "OpenSSL is required for secure key storage on this platform but was not found. Please install OpenSSL."
         return
     }
-    
+
     # Create a user-specific salt based on username and machine
     $saltData = "$env:USER$(hostname)PowerShell$KeyName"
     $salt = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($saltData))
     $saltHex = [System.BitConverter]::ToString($salt).Replace('-', '').Substring(0, 16)
-    
+
     # Create the key file path
     $keyFile = Join-Path $ProfileFolder "$KeyName.key"
-    
+
     # Encrypt the API key using OpenSSL
     $tempFile = [System.IO.Path]::GetTempFileName()
     try {
         $ApiKey | Out-File -FilePath $tempFile -Encoding UTF8 -NoNewline
-        
+
         $process = Start-Process -FilePath "openssl" -ArgumentList @(
             "enc", "-aes-256-cbc", "-salt", "-pbkdf2", "-iter", "100000",
             "-in", $tempFile, "-out", $keyFile, "-pass", "pass:$saltHex"
         ) -Wait -PassThru -NoNewWindow
-        
+
         if ($process.ExitCode -eq 0) {
             Write-Host "API key stored securely using OpenSSL encryption at: $keyFile" -ForegroundColor Green
         }
@@ -1548,23 +1641,23 @@ function Get-SecureApiKey {
     param(
         [string]$KeyName = "GeminiAPI"
     )
-    
+
     try {
         if ($IsWindows) {
             # Windows: Use DPAPI
             $keyFile = Join-Path $ProfileFolder "$KeyName.key"
-            
+
             if (-not (Test-Path $keyFile)) {
                 return $null
             }
-            
+
             $encryptedString = Get-Content -Path $keyFile -Raw
             $secureString = ConvertTo-SecureString -String $encryptedString.Trim()
-            
+
             $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureString)
             $apiKey = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($BSTR)
             [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
-            
+
             return $apiKey
         }
         elseif ($IsMacOS) {
@@ -1572,14 +1665,14 @@ function Get-SecureApiKey {
             try {
                 $serviceName = "PowerShell-Profile-$KeyName"
                 $accountName = $env:USER
-                
+
                 $process = Start-Process -FilePath "security" -ArgumentList @(
                     "find-generic-password",
                     "-a", $accountName,
                     "-s", $serviceName,
                     "-w"
                 ) -Wait -PassThru -NoNewWindow -RedirectStandardOutput
-                
+
                 if ($process.ExitCode -eq 0) {
                     $apiKey = $process.StandardOutput.ReadToEnd().Trim()
                     if (-not [string]::IsNullOrEmpty($apiKey)) {
@@ -1590,7 +1683,7 @@ function Get-SecureApiKey {
             catch {
                 # Fallback to file-based decryption
             }
-            
+
             # Fallback: File-based decryption for macOS
             return Get-SecureApiKeyUnix -KeyName $KeyName
         }
@@ -1621,25 +1714,25 @@ function Get-SecureApiKeyUnix {
     param(
         [string]$KeyName = "GeminiAPI"
     )
-    
+
     # Check if openssl is available
     $opensslPath = Get-Command openssl -ErrorAction SilentlyContinue
     if (-not $opensslPath) {
         Write-Error "OpenSSL is required for secure key retrieval on this platform but was not found."
         return $null
     }
-    
+
     $keyFile = Join-Path $ProfileFolder "$KeyName.key"
-    
+
     if (-not (Test-Path $keyFile)) {
         return $null
     }
-    
+
     # Recreate the same salt used for encryption
     $saltData = "$env:USER$(hostname)PowerShell$KeyName"
     $salt = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($saltData))
     $saltHex = [System.BitConverter]::ToString($salt).Replace('-', '').Substring(0, 16)
-    
+
     # Decrypt the API key using OpenSSL
     $tempFile = [System.IO.Path]::GetTempFileName()
     try {
@@ -1647,7 +1740,7 @@ function Get-SecureApiKeyUnix {
             "enc", "-aes-256-cbc", "-d", "-pbkdf2", "-iter", "100000",
             "-in", $keyFile, "-out", $tempFile, "-pass", "pass:$saltHex"
         ) -Wait -PassThru -NoNewWindow
-        
+
         if ($process.ExitCode -eq 0 -and (Test-Path $tempFile)) {
             $apiKey = Get-Content -Path $tempFile -Raw
             return $apiKey.Trim()
@@ -1689,7 +1782,7 @@ Gemini can use these formatting commands:
 - Available colors: Black, DarkBlue, DarkGreen, DarkCyan, DarkRed, DarkMagenta, DarkYellow, Gray, DarkGray, Blue, Green, Cyan, Red, Magenta, Yellow, White
 
 .PARAMETER InitialPrompt
-The first question or message to start the conversation with the chatbot. If not provided, 
+The first question or message to start the conversation with the chatbot. If not provided,
 the function will start with an interactive prompt.
 
 .PARAMETER Model
@@ -1714,13 +1807,13 @@ function Invoke-GeminiChat {
         [string]$InitialPrompt = "",
 
         [string]$Model = (Get-DefaultGeminiFlashModel),
-        
+
         [switch]$ResetApiKey
     )
 
     # --- Get or Set API Key ---
     $apiKey = $null
-    
+
     if ($ResetApiKey.IsPresent) {
         Write-Host "Resetting API key..." -ForegroundColor Yellow
         $apiKey = $null
@@ -1728,29 +1821,29 @@ function Invoke-GeminiChat {
     else {
         $apiKey = Get-SecureApiKey -KeyName "GeminiAPI"
     }
-    
+
     if ([string]::IsNullOrEmpty($apiKey)) {
         Write-Host "Google Gemini API key not found or reset requested." -ForegroundColor Yellow
         Write-Host "Please enter your Google Gemini API key:" -ForegroundColor Cyan
         $inputApiKey = Read-Host -AsSecureString
-        
+
         # Convert secure string to plain text for this session
         # Use PtrToStringBSTR for cross-platform compatibility (.NET Core/Linux)
         $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($inputApiKey)
         $apiKey = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($BSTR)
         [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
-        
+
         if ([string]::IsNullOrEmpty($apiKey)) {
             Write-Error "API key cannot be empty."
             return
         }
-        
+
         # Store the API key securely
         Set-SecureApiKey -ApiKey $apiKey -KeyName "GeminiAPI"
     }
 
     $uri = "https://generativelanguage.googleapis.com/v1beta/models/$($Model):generateContent"
-    
+
     $headers = @{
         "Content-Type"   = "application/json"
         "X-goog-api-key" = $apiKey
@@ -1798,7 +1891,7 @@ AVAILABLE FORMATTING COMMANDS:
 
 TERMINAL-OPTIMIZED FORMATTING STRATEGY:
 - [FG:Green] for SUCCESS, confirmations, positive results
-- [FG:Yellow] for WARNINGS, important notes, cautions  
+- [FG:Yellow] for WARNINGS, important notes, cautions
 - [FG:Red] for ERRORS, critical info, urgent warnings
 - [FG:Cyan] for COMMANDS, code snippets, technical terms
 - [FG:Magenta] for PARAMETERS, variables, PowerShell-specific terms
@@ -1811,7 +1904,7 @@ TERMINAL-FRIENDLY RESPONSE EXAMPLES:
 GOOD (Terminal-optimized):
 [FG:White]Process Information:[/FG]
 • [FG:Cyan]Name:[/FG] notepad.exe
-• [FG:Cyan]PID:[/FG] 1234  
+• [FG:Cyan]PID:[/FG] 1234
 • [FG:Cyan]CPU:[/FG] 0.5%
 
 [FG:Yellow]Tip:[/FG] Use [FG:Cyan]Get-Process -Name notepad[/FG] to filter
@@ -1851,7 +1944,7 @@ PRACTICAL TERMINAL TIPS:
 
 Remember: Terminal users value SPEED and CLARITY over detailed explanations. Make every line count and every color meaningful!
 "@
-    
+
     # --- Interactive Chat Loop ---
     # If no initial prompt was provided, start with interactive mode
     $currentPrompt = if ([string]::IsNullOrWhiteSpace($InitialPrompt)) {
@@ -1882,7 +1975,7 @@ Remember: Terminal users value SPEED and CLARITY over detailed explanations. Mak
         try {
             # Add a blank line for better spacing
             Write-Host ""
-            
+
             $response = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $body -ContentType "application/json"
 
             if (-not $sessionHeaderShown) {
@@ -1902,7 +1995,7 @@ Remember: Terminal users value SPEED and CLARITY over detailed explanations. Mak
                 Write-Host ""
                 $sessionHeaderShown = $true
             }
-            
+
             if ($null -eq $response.candidates) {
                 Write-Warning "The API did not return a valid response. The content may have been blocked."
                 $modelText = "I am unable to provide a response to that."
@@ -1931,7 +2024,7 @@ Remember: Terminal users value SPEED and CLARITY over detailed explanations. Mak
                     Write-Host "Could not read error details from response." -ForegroundColor DarkYellow
                 }
             }
-            break 
+            break
         }
 
         Write-Host "Gemini: " -ForegroundColor Green -NoNewline
@@ -2025,17 +2118,17 @@ function Invoke-SuggestCommitMessage {
     [CmdletBinding(SupportsShouldProcess)]
     param(
         [int]$CommitCount = 100,
-        
+
         [string]$Model = (Get-DefaultGeminiFlashModel),
-        
+
         [switch]$Force,
-        
+
         [string]$AdditionalInstructions = "",
-        
+
         [string]$InstructionsFile = "",
-        
+
         [switch]$ResetApiKey,
-        
+
         [switch]$ReturnOnly
     )
 
@@ -2067,10 +2160,10 @@ function Invoke-SuggestCommitMessage {
         }
         return
     }
-    
+
     $stagedFilesArray = $stagedFiles -split "`n" | Where-Object { $_ }
     Write-Verbose "✓ Found $($stagedFilesArray.Count) staged file(s)"
-    
+
     if ($VerbosePreference -eq 'Continue') {
         Write-Verbose "Staged files:"
         foreach ($file in $stagedFilesArray) {
@@ -2133,7 +2226,7 @@ function Invoke-SuggestCommitMessage {
     # --- Get or Set API Key ---
     Write-Verbose "Retrieving API key..."
     $apiKey = $null
-    
+
     if ($ResetApiKey.IsPresent) {
         Write-Host "Resetting API key..." -ForegroundColor Yellow
         $apiKey = $null
@@ -2141,23 +2234,23 @@ function Invoke-SuggestCommitMessage {
     else {
         $apiKey = Get-SecureApiKey -KeyName "GeminiAPI"
     }
-    
+
     if ([string]::IsNullOrEmpty($apiKey)) {
         Write-Host "Google Gemini API key not found or reset requested." -ForegroundColor Yellow
         Write-Host "Please enter your Google Gemini API key:" -ForegroundColor Cyan
         $inputApiKey = Read-Host -AsSecureString
-        
+
         # Convert secure string to plain text for this session
         # Use PtrToStringBSTR for cross-platform compatibility (.NET Core/Linux)
         $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($inputApiKey)
         $apiKey = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($BSTR)
         [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
-        
+
         if ([string]::IsNullOrEmpty($apiKey)) {
             Write-Error "API key cannot be empty."
             return
         }
-        
+
         # Store the API key securely
         Set-SecureApiKey -ApiKey $apiKey -KeyName "GeminiAPI"
         Write-Verbose "✓ API key stored securely"
@@ -2201,7 +2294,7 @@ Please provide ONLY the commit message, without any explanations or additional t
     Write-Verbose "Setting up Gemini API connection..."
     $uri = "https://generativelanguage.googleapis.com/v1beta/models/$($Model):generateContent"
     Write-Verbose "Using model: $Model"
-    
+
     $headers = @{
         "Content-Type"   = "application/json"
         "X-goog-api-key" = $apiKey
@@ -2210,40 +2303,40 @@ Please provide ONLY the commit message, without any explanations or additional t
     # --- API Call ---
     $chatHistory = @()
     $resolvedModelVersion = $null
-    
+
     # Function to call Gemini API (reusable for refinements)
     function Invoke-GeminiForCommit {
         param(
             [string]$PromptText,
             [array]$History = @()
         )
-        
+
         $bodyContents = @()
-        
+
         # Add history if exists
         if ($History.Count -gt 0) {
             $bodyContents += $History
         }
-        
+
         # Add current user message
         $bodyContents += @{
             role  = "user"
             parts = @(@{ text = $PromptText })
         }
-        
+
         $requestBody = @{
             contents = $bodyContents
         } | ConvertTo-Json -Depth 10
-        
+
         Write-Verbose "Sending request to Gemini API..."
-        
+
         $apiResponse = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Body $requestBody -ContentType "application/json"
         if ([string]::IsNullOrWhiteSpace($resolvedModelVersion) -and -not [string]::IsNullOrWhiteSpace($apiResponse.modelVersion)) {
             Set-Variable -Name resolvedModelVersion -Value $apiResponse.modelVersion -Scope 1
         }
-        
+
         Write-Verbose "✓ Response received from Gemini API"
-        
+
         if ($null -eq $apiResponse.candidates) {
             if ($ReturnOnly) {
                 return $null
@@ -2251,16 +2344,16 @@ Please provide ONLY the commit message, without any explanations or additional t
             Write-Error "The API did not return a valid response. The content may have been blocked."
             return $null
         }
-        
+
         $message = $apiResponse.candidates[0].content.parts[0].text.Trim()
-        
+
         # Remove any markdown code block markers if present
         $message = $message -replace '^```.*\n', '' -replace '\n```$', ''
         $message = $message.Trim()
-        
+
         return $message
     }
-    
+
     # Initial API call
     try {
         $suggestedMessage = Invoke-GeminiForCommit -PromptText $promptText -History $chatHistory
@@ -2280,11 +2373,11 @@ Please provide ONLY the commit message, without any explanations or additional t
 
             Write-Host $statusMessage -ForegroundColor Cyan
         }
-        
+
         if ($null -eq $suggestedMessage) {
             return
         }
-        
+
         # Add to chat history
         $chatHistory += @{
             role  = "user"
@@ -2294,7 +2387,7 @@ Please provide ONLY the commit message, without any explanations or additional t
             role  = "model"
             parts = @(@{ text = $suggestedMessage })
         }
-        
+
     }
     catch {
         if ($ReturnOnly) {
@@ -2319,7 +2412,7 @@ Please provide ONLY the commit message, without any explanations or additional t
         }
         return
     }
-    
+
     # --- ReturnOnly mode: just return the message ---
     if ($ReturnOnly.IsPresent) {
         return $suggestedMessage
@@ -2342,7 +2435,7 @@ Please provide ONLY the commit message, without any explanations or additional t
             Write-Host "  • $file" -ForegroundColor Gray
         }
         Write-Host ""
-        
+
         # Auto-commit without prompting
         Write-Verbose "Force mode enabled - committing automatically..."
         try {
@@ -2365,7 +2458,7 @@ Please provide ONLY the commit message, without any explanations or additional t
             Write-Host "  • $file" -ForegroundColor Gray
         }
         Write-Host ""
-        
+
         # Interactive loop with refinement capability
         $continueLoop = $true
         while ($continueLoop) {
@@ -2373,16 +2466,16 @@ Please provide ONLY the commit message, without any explanations or additional t
             Write-Host "Current commit message:" -ForegroundColor Cyan
             Write-Host "  $suggestedMessage" -ForegroundColor White
             Write-Host ""
-            
+
             # Prompt for action
             Write-Host "What would you like to do?" -ForegroundColor Yellow
             Write-Host "  Type 'commit' to commit with this message" -ForegroundColor White
             Write-Host "  Press Enter to copy to clipboard" -ForegroundColor White
             Write-Host "  Type anything else to refine the message with AI" -ForegroundColor White
             Write-Host ""
-            
+
             $action = Read-Host "Your choice"
-            
+
             if ($action -ceq 'commit') {
                 # Commit with current message
                 Write-Verbose "User chose to commit - executing git commit..."
@@ -2420,7 +2513,7 @@ Please provide ONLY the commit message, without any explanations or additional t
                 # Refine the message with AI
                 Write-Host "`nRefining commit message with your feedback..." -ForegroundColor Cyan
                 Write-Verbose "User provided refinement instructions: $action"
-                
+
                 # Build refinement prompt
                 $refinementPrompt = @"
 The user wants to refine the commit message. Their feedback is:
@@ -2433,15 +2526,15 @@ Please generate an improved commit message based on this feedback while still:
 
 Provide ONLY the refined commit message, without any explanations.
 "@
-                
+
                 try {
                     # Call API with conversation history
                     $refinedMessage = Invoke-GeminiForCommit -PromptText $refinementPrompt -History $chatHistory
-                    
+
                     if ($null -ne $refinedMessage) {
                         # Update message and history
                         $suggestedMessage = $refinedMessage
-                        
+
                         $chatHistory += @{
                             role  = "user"
                             parts = @(@{ text = $refinementPrompt })
@@ -2450,7 +2543,7 @@ Provide ONLY the refined commit message, without any explanations.
                             role  = "model"
                             parts = @(@{ text = $refinedMessage })
                         }
-                        
+
                         Write-Host "✓ Message refined successfully!" -ForegroundColor Green
                         Write-Host ""
                     }
