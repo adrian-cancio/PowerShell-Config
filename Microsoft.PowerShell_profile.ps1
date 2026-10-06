@@ -5,7 +5,6 @@ $ProfileParts = @(
     "Common.ps1"
     "Git.ps1"
     "Prompt.ps1"
-    "Readline.ps1"
     "Utilities.ps1"
     "Shortcuts.ps1"
     "Pip.ps1"

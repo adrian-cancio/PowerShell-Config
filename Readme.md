@@ -200,9 +200,7 @@ The profile uses a JSON configuration file (`powershell.config.json`) for settin
     "Microsoft.PowerShell.Profile:GitPrompt": true,
     "Microsoft.PowerShell.Profile:GitPromptTimeoutMs": 1500,
     "Microsoft.PowerShell.Profile:PromptMinDurationSeconds": 2,
-    "Microsoft.PowerShell.Profile:PredictionViewStyle": "ListView",
-    "Microsoft.PowerShell.Profile:PredictionMode": "OnDemand",
-    "Microsoft.PowerShell.Profile:PredictionToggleKey": "Ctrl+Alt+p",
+
     "Microsoft.PowerShell.Profile:EnableZoxide": true
 }
 ```
@@ -220,9 +218,7 @@ The profile uses a JSON configuration file (`powershell.config.json`) for settin
 | `GitPrompt` | Show git branch and status in the prompt | `true` |
 | `GitPromptTimeoutMs` | Max wait for `git status` before showing `…` | `1500` |
 | `PromptMinDurationSeconds` | Show last command duration above this threshold | `2` |
-| `PredictionViewStyle` | PSReadLine predictions: `ListView` or `InlineView` | `"ListView"` |
-| `PredictionMode` | `OnDemand`, `Always` or `Off` | `"OnDemand"` |
-| `PredictionToggleKey` | Key that shows/hides suggestions in `OnDemand` mode | `"Ctrl+Alt+p"` |
+
 | `EnableZoxide` | Initialize zoxide when installed | `true` |
 
 ### Profile Layout
@@ -234,7 +230,6 @@ The profile uses a JSON configuration file (`powershell.config.json`) for settin
 | `Settings.ps1` | Settings file handling, OS detection, `Code` folder |
 | `Common.ps1` | Shared helpers (fast executable lookup, data directory) |
 | `Git.ps1`, `Prompt.ps1` | Git status and the prompt |
-| `Readline.ps1` | PSReadLine predictions, history search, secret-aware history |
 | `Utilities.ps1` | Weather, IP, disk space, directory tree |
 | `Shortcuts.ps1` | Navigation and git shortcuts, zoxide |
 | `Pip.ps1`, `Copilot.ps1` | pip wrappers, `ghcs`/`ghce` |
@@ -258,9 +253,6 @@ The profile uses a JSON configuration file (`powershell.config.json`) for settin
 | `Show-ProfileInfo` | PowerShell version, load time per part, missing tools |
 | `Update-ProfileCompletions` | Refresh the cached `gh` completion script |
 
-History suggestions are hidden by default so they never expose old commands on screen. Press `Ctrl+Alt+P` (configurable with `PredictionToggleKey`) to show or hide them; they also hide by themselves on `Enter` and `Esc`. Set `PredictionMode` to `Always` to keep them visible. Up/Down still search the history by what you have typed.
-
-Command history skips lines that look like they contain secrets (passwords, tokens, API keys). They stay available in the current session but are not written to the history file.
 
 ## 🔧 Advanced Features
 

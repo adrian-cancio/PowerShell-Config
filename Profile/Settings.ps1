@@ -18,9 +18,6 @@ $Global:DefaultSettings = [ordered]@{
     "Microsoft.PowerShell.Profile:GitPrompt"           = $true           # Show git branch and status in the prompt
     "Microsoft.PowerShell.Profile:GitPromptTimeoutMs"  = 1500            # Max time to wait for git status before showing a placeholder
     "Microsoft.PowerShell.Profile:PromptMinDurationSeconds" = 2          # Show the last command duration only above this threshold
-    "Microsoft.PowerShell.Profile:PredictionViewStyle" = "ListView"      # PSReadLine prediction style: ListView or InlineView
-    "Microsoft.PowerShell.Profile:PredictionMode"      = "OnDemand"      # History suggestions: OnDemand (toggle key below), Always, or Off
-    "Microsoft.PowerShell.Profile:PredictionToggleKey" = "Ctrl+Alt+p"    # Key that shows or hides history suggestions in OnDemand mode
     "Microsoft.PowerShell.Profile:EnableZoxide"        = $true           # Initialize zoxide when it is installed
 }
 
