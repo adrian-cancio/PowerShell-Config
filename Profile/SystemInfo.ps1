@@ -97,7 +97,6 @@ function Show-SystemInfo {
     Write-Host ("  ${ansiGold}SYSTEM${ansiReset}")
     Write-Host ("  ${ansiGray}User:${ansiReset}   $userName@$hostName")
     Write-Host ("  ${ansiGray}OS:${ansiReset}      $osDesc ($osArch)")
-    Write-Host ("  ${ansiGray}Shell:${ansiReset}   $shellName")
     if ($uptimeStr) { Write-Host ("  ${ansiGray}Up:${ansiReset}      $uptimeStr") }
     if ($memStr)    { Write-Host ("  ${ansiGray}Mem:${ansiReset}     $memStr") }
     Write-Host ("  ${ansiGray}Rendered:${ansiReset} $($sw.ElapsedMilliseconds) ms")
