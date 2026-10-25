@@ -10,6 +10,8 @@ $Global:SettingsFile = Join-Path $ProfileFolder $SettingsFileName
 # ----------------------------------
 $Global:DefaultSettings = [ordered]@{
     "Microsoft.PowerShell.Profile:PromptColorScheme"   = "Default"        # Default prompt color scheme
+    "Microsoft.PowerShell.Profile:PromptEngine"        = "Custom"        # Custom or OhMyPosh (optional executable)
+    "Microsoft.PowerShell.Profile:OhMyPoshTheme"        = "Themes/gruvbox.omp.json" # Relative to the profile folder, or an absolute local path
     "Microsoft.PowerShell.Profile:DefaultPrompt"       = $false          # If true, use PowerShell's default prompt instead of the custom one
     "Microsoft.PowerShell.Profile:AskCreateCodeFolder" = $true           # Whether to ask for the creation of the "Code" folder if missing
     "Microsoft.PowerShell.Profile:CodeFolderName"      = "Code"          # Default name for the code folder

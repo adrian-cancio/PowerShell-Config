@@ -226,3 +226,39 @@ function Prompt() {
     $global:LASTEXITCODE = $LastExitCode
     return " "
 }
+
+# Keep Custom installed first so every optional-engine failure has a usable prompt.
+# The text-based loader supplies ProfileModuleRoot; PSScriptRoot can be empty there.
+$PromptProfileRoot = if ($ProfileModuleRoot) { Split-Path -Parent $ProfileModuleRoot }
+elseif ($PSScriptRoot) { Split-Path -Parent $PSScriptRoot }
+else { Split-Path -Parent $PROFILE }
+
+if (-not $DefaultPrompt -and $Global:UserSettings["Microsoft.PowerShell.Profile:PromptEngine"] -eq "OhMyPosh") {
+    $SavedPromptExitCode = $global:LASTEXITCODE
+    $CustomPrompt = $function:prompt
+    $SavedPromptErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Stop'
+        $PoshCommand = Get-Command oh-my-posh -CommandType Application -ErrorAction Stop | Select-Object -First 1
+        $PoshTheme = $Global:UserSettings["Microsoft.PowerShell.Profile:OhMyPoshTheme"]
+        if ([string]::IsNullOrWhiteSpace($PoshTheme)) { $PoshTheme = 'Themes/gruvbox.omp.json' }
+        if (-not [IO.Path]::IsPathRooted($PoshTheme)) { $PoshTheme = Join-Path $PromptProfileRoot $PoshTheme }
+        if (-not (Test-Path -LiteralPath $PoshTheme -PathType Leaf)) { throw "Theme not found: $PoshTheme" }
+        # Validate JSON locally: OMP can otherwise silently use its default theme.
+        $null = Get-Content -LiteralPath $PoshTheme -Raw | ConvertFrom-Json -ErrorAction Stop
+        $PoshInit = (& $PoshCommand.Source init pwsh --config $PoshTheme --print --eval) -join "`n"
+        if ($LASTEXITCODE -ne 0) { throw "oh-my-posh init exited with code $LASTEXITCODE" }
+        if ([string]::IsNullOrWhiteSpace($PoshInit)) { throw 'oh-my-posh init returned an empty script' }
+        $PoshScript = [scriptblock]::Create($PoshInit)
+        . $PoshScript
+        if ($function:prompt -eq $CustomPrompt) { throw 'oh-my-posh did not install a prompt' }
+    }
+    catch {
+        Set-Item Function:global:prompt -Value $CustomPrompt
+        Write-Warning "Oh My Posh initialization failed; using Custom prompt: $($_.Exception.Message)"
+    }
+    finally {
+        $ErrorActionPreference = $SavedPromptErrorAction
+        $global:LASTEXITCODE = $SavedPromptExitCode
+    }
+}

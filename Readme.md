@@ -156,6 +156,23 @@ The wrapper detects virtual environments by checking:
 - `$env:VIRTUAL_ENV` (standard Python virtual environments)
 - `$env:CONDA_DEFAULT_ENV` (Conda environments)
 
+### Optional Oh My Posh engine
+
+The default engine remains `Custom`. To use an already installed `oh-my-posh` executable on Windows, Linux or macOS, add these settings to `powershell.config.json` and open a new terminal:
+
+```json
+"Microsoft.PowerShell.Profile:PromptEngine": "OhMyPosh",
+"Microsoft.PowerShell.Profile:OhMyPoshTheme": "Themes/gruvbox.omp.json"
+```
+
+Keep the local `Themes/` directory beside the profile loader. Relative theme paths resolve from that directory's parent (the profile folder); absolute local paths also work. No binary or theme is downloaded. The bundled two-line Gruvbox Dark theme uses built-in OS, session, path, status, execution-time (>2 seconds), and Git segments, without running the Custom Git helper. Its Git symbols and timing format follow OMP rather than the Custom settings below. `PromptColorScheme`, `GitPrompt`, `GitPromptTimeoutMs` and `PromptMinDurationSeconds` apply to Custom; customize the JSON theme for OMP. OS/branch icons may require a Nerd Font.
+
+The first line also shows `[py:environment-name]` only for an active Python venv/conda environment (never just an installed runtime or Python project), muted `[SSH]` when OMP detects an SSH session, and red `[ADMIN]` for actual root/administrator identity. These use built-in Python/session properties, show no runtime versions, and leave the two-line layout unchanged. Real-render checks: `pwsh -NoProfile -NonInteractive -File Tests/Prompt.Context.Tests.ps1 -ScratchRoot <scratch-directory>` (requires OMP and Python with `venv`; creates an isolated temporary environment without pip). SSH/conda inputs are simulated in child processes; elevation is checked against the actual identity, not mocked. Windows/macOS and elevated runtime checks remain pending.
+
+`DefaultPrompt: true` takes precedence over both engines. Missing executables/themes, invalid JSON, and initialization failures warn and retain/restore Custom. Roll back by setting `Microsoft.PowerShell.Profile:PromptEngine` to `Custom` and opening a new terminal (rather than reloading an OMP-initialized session).
+
+Regression checks (no extra test dependencies): `pwsh -NoProfile -NonInteractive -File Tests/Prompt.Tests.ps1`. These include real OMP activation and require the executable to be installed. Linux was exercised with OMP 28.10.0; Windows/macOS still need runtime and visual checks.
+
 ### Prompt Customization
 
 The prompt is two lines. An OS icon (`⊞` Windows, `λ` Linux, `⌘` macOS) comes first, then `user@hostname` and the current path. The second line holds the git status and the prompt marker:
