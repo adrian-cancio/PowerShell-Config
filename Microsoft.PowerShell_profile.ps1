@@ -1,7 +1,5 @@
 $ProfileModuleRoot = Join-Path $PSScriptRoot "Profile"
 
-$Global:ProfileLoadStopwatch = [Diagnostics.Stopwatch]::StartNew()
-
 $ProfileParts = @(
     "Settings.ps1"
     "Common.ps1"
@@ -57,8 +55,3 @@ if ($Global:UserSettings["Microsoft.PowerShell.Profile:EnableMathModule"] -ne $f
 }
 
 Remove-Variable ProfileModuleRoot, ProfileParts, ProfilePart, ProfilePartPath, ProfilePartTimer, MathModulePath -ErrorAction SilentlyContinue
-
-$Global:ProfileLoadStopwatch.Stop()
-$env:PSH_PROFILE_LOAD_MS = [int]($Global:ProfileLoadStopwatch.Elapsed.TotalMilliseconds)
-$env:PSH_SHELL_VERSION = $PSVersionTable.PSVersion.ToString()
-Remove-Variable ProfileLoadStopwatch -ErrorAction SilentlyContinue

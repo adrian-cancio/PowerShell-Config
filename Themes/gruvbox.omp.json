@@ -8,8 +8,7 @@
       "alignment": "left",
       "segments": [
         { "type": "os", "style": "plain", "foreground": "#928374", "template": "{{ .Icon }} " },
-        { "type": "session", "style": "plain", "foreground": "#fabd2f", "template": "{{ if .SSHSession }}<#928374>[SSH] </>{{ end }}{{ if or .WSL .Env.WSL_DISTRO_NAME }}<#928374>[WSL] </>{{ end }}{{ if or .Env.CONTAINER .Env.DISTROBOX_ENTERED }}<#928374>[CONTAINER] </>{{ end }}{{ if .Root }}<#fb4934>[ADMIN] </>{{ end }}{{ .UserName }}<#928374>@</>{{ .HostName }}<#928374> | pwsh {{ .Env.PSH_SHELL_VERSION }}<#928374> | </>" },
-        { "type": "text", "style": "plain", "foreground": "#928374", "template": "{{ if .Env.PSH_PROFILE_LOAD_MS }}[load {{ .Env.PSH_PROFILE_LOAD_MS }}ms] {{ end }}" },
+        { "type": "session", "style": "plain", "foreground": "#fabd2f", "template": "{{ if .SSHSession }}<#928374>[SSH] </>{{ end }}{{ if or .WSL .Env.WSL_DISTRO_NAME }}<#928374>[WSL] </>{{ end }}{{ if or .Env.CONTAINER .Env.DISTROBOX_ENTERED }}<#928374>[CONTAINER] </>{{ end }}{{ if .Root }}<#fb4934>[ADMIN] </>{{ end }}{{ .UserName }}<#928374>@</>{{ .HostName }}<#928374> | </>" },
         { "type": "path", "style": "plain", "foreground": "#fabd2f", "template": "{{ .Path }}", "options": { "style": "full" } },
         { "type": "python", "style": "plain", "foreground": "#fabd2f", "template": " <#928374>[</>py:{{ .Venv }}<#928374>]</>", "options": { "display_mode": "environment", "fetch_virtual_env": true, "display_default": true, "home_enabled": true } },
         { "type": "status", "style": "plain", "foreground": "#fb4934", "template": " ✗{{ .Code }}" },
