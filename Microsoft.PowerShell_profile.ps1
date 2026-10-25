@@ -7,6 +7,7 @@ $ProfileParts = @(
     "Prompt.ps1"
     "Utilities.ps1"
     "Shortcuts.ps1"
+    "SystemInfo.ps1"
     "Pip.ps1"
     "Copilot.ps1"
     "SecureApiKey.ps1"

@@ -18,9 +18,10 @@ $Global:DefaultSettings = [ordered]@{
     "Microsoft.PowerShell.Profile:EnableRandomTitle"   = $false          # Enables "Hackerman" style random PowerShell title
     "Microsoft.PowerShell.Profile:EnableMathModule"    = $true
     "Microsoft.PowerShell.Profile:GitPrompt"           = $true           # Show git branch and status in the prompt
-    "Microsoft.PowerShell.Profile:GitPromptTimeoutMs"  = 1500            # Max time to wait for git status before showing a placeholder
+    "Microsoft.PowerShell.Profile:GitPromptTimeoutMs"  = 1500            # Max time to wait for `git status` before showing a placeholder
     "Microsoft.PowerShell.Profile:PromptMinDurationSeconds" = 2          # Show the last command duration only above this threshold
     "Microsoft.PowerShell.Profile:EnableZoxide"        = $true           # Initialize zoxide when it is installed
+    "Microsoft.PowerShell.Profile:ShowSystemInfo"        = $true           # Show lightweight system info on startup
 }
 
 # ----------------------------------
