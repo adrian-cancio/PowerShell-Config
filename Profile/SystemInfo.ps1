@@ -1,64 +1,6 @@
 # ----------------------------------
 # System info banner (lightweight neofetch-style)
 # ----------------------------------
-function Show-DistroLogo {
-    [CmdletBinding()]
-    param()
-
-    $id = ""
-    if ($IsLinux -and (Test-Path "/etc/os-release")) {
-        $release = Get-Content "/etc/os-release" -Raw -ErrorAction SilentlyContinue
-        $line = ($release -split "`n") | Where-Object { $_ -match '^ID=' } | Select-Object -First 1
-        if ($line -match 'ID="?(?<id>[^"\n]+)"?') { $id = $Matches['id'] }
-    }
-
-    $ansiYellow = [char]27 + "[38;5;214m"
-    $ansiReset = [char]27 + "[0m"
-
-    $logo = @()
-
-    switch ($id) {
-        "fedora" {
-            $logo = @(
-                "   ___",
-                "  / __|",
-                "  \__ \"
-            )
-        }
-        "ubuntu" {
-            $logo = @(
-                "   __",
-                "  / /",
-                " / /"
-            )
-        }
-        "debian" {
-            $logo = @(
-                "  _ ",
-                " (_)"
-            )
-        }
-        "arch" {
-            $logo = @(
-                "  /\",
-                " /  \",
-                "/ /\ \"
-            )
-        }
-        default {
-            $logo = @(
-                "  _ ",
-                " (_)"
-            )
-        }
-    }
-
-    foreach ($line in $logo) {
-        Write-Host ("  ${ansiYellow}" + $line + "${ansiReset}")
-    }
-    Write-Host ""
-}
-
 function Show-SystemInfo {
     [CmdletBinding()]
     param()
@@ -204,25 +146,23 @@ function Show-SystemInfo {
 
     $sw.Stop()
 
-    $ansiGray = [char]27 + "[38;5;223m"
-    $ansiGold = [char]27 + "[38;5;214m"
-    $ansiReset = [char]27 + "[0m"
+    $labelWidth = 10
+    $fmt = "  ${ansiGray}{0,-$labelWidth}${ansiReset} {1}"
 
     Write-Host ""
-    Show-DistroLogo
     Write-Host ("  ${ansiGold}SYSTEM${ansiReset}")
-    Write-Host ("  ${ansiGray}User:${ansiReset}   $userName@$hostName")
-    Write-Host ("  ${ansiGray}OS:${ansiReset}      $osDesc ($osArch)")
-    if ($kernelStr) { Write-Host ("  ${ansiGray}Kernel:${ansiReset}  $kernelStr") }
-    if ($uptimeStr) { Write-Host ("  ${ansiGray}Up:${ansiReset}      $uptimeStr") }
-    if ($pkgStr)    { Write-Host ("  ${ansiGray}Pkgs:${ansiReset}    $pkgStr") }
-    if ($wmStr)     { Write-Host ("  ${ansiGray}WM:${ansiReset}      $wmStr") }
-    if ($termStr)   { Write-Host ("  ${ansiGray}Term:${ansiReset}    $termStr") }
-    if ($cpuStr)    { Write-Host ("  ${ansiGray}CPU:${ansiReset}     $cpuStr") }
-    if ($memStr)    { Write-Host ("  ${ansiGray}Mem:${ansiReset}     $memStr") }
-    if ($diskStr)   { Write-Host ("  ${ansiGray}Disk:${ansiReset}    $diskStr") }
-    if ($batteryStr){ Write-Host ("  ${ansiGray}Bat:${ansiReset}     $batteryStr") }
-    Write-Host ("  ${ansiGray}Rendered:${ansiReset} $($sw.ElapsedMilliseconds) ms")
+    Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}User:${ansiReset}", "$userName@$hostName"))
+    Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}OS:${ansiReset}", "$osDesc ($osArch)"))
+    if ($kernelStr) { Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}Kernel:${ansiReset}", $kernelStr)) }
+    if ($uptimeStr) { Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}Up:${ansiReset}", $uptimeStr)) }
+    if ($pkgStr)    { Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}Pkgs:${ansiReset}", $pkgStr)) }
+    if ($wmStr)     { Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}WM:${ansiReset}", $wmStr)) }
+    if ($termStr)   { Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}Term:${ansiReset}", $termStr)) }
+    if ($cpuStr)    { Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}CPU:${ansiReset}", $cpuStr)) }
+    if ($memStr)    { Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}Mem:${ansiReset}", $memStr)) }
+    if ($diskStr)   { Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}Disk:${ansiReset}", $diskStr)) }
+    if ($batteryStr){ Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}Bat:${ansiReset}", $batteryStr)) }
+    Write-Host ("{0,-$labelWidth}{1:N0} ms" -f ("${ansiGray}Rendered:${ansiReset}", $sw.ElapsedMilliseconds))
     Write-Host ""
 }
 
