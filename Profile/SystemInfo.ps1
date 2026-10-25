@@ -89,7 +89,7 @@ function Show-SystemInfo {
 
     $sw.Stop()
 
-    $ansiGray = [char]27 + "[38;5;242m"
+    $ansiGray = [char]27 + "[38;5;223m"
     $ansiGold = [char]27 + "[38;5;214m"
     $ansiReset = [char]27 + "[0m"
 
