@@ -26,7 +26,7 @@ function Render([string]$Label, [hashtable]$Overrides, [string]$Directory = $Scr
     $Info.RedirectStandardOutput = $true
     $Info.RedirectStandardError = $true
     $Info.WorkingDirectory = $Directory
-    foreach ($Name in @('VIRTUAL_ENV', 'CONDA_DEFAULT_ENV', 'CONDA_PREFIX', 'SSH_CONNECTION', 'SSH_CLIENT', 'SSH_TTY')) { $null = $Info.Environment.Remove($Name) }
+    foreach ($Name in @('VIRTUAL_ENV', 'CONDA_DEFAULT_ENV', 'CONDA_PREFIX', 'SSH_CONNECTION', 'SSH_CLIENT', 'SSH_TTY', 'WSL_DISTRO_NAME', 'CONTAINER', 'DISTROBOX_ENTERED')) { $null = $Info.Environment.Remove($Name) }
     foreach ($Name in $Overrides.Keys) { $Info.Environment[$Name] = $Overrides[$Name] }
     foreach ($Argument in @('print', 'primary', '--config', $Theme, '--plain', '--shell', 'pwsh', '--pwd', $Directory, '--status', '0')) { $Info.ArgumentList.Add($Argument) }
     $Process = [Diagnostics.Process]::Start($Info)
@@ -50,4 +50,8 @@ $Inactive = Render 'Python project without active environment' @{} $Project
 Assert ($Inactive -notmatch '\[py:') 'Python project alone enabled environment indicator'
 $Conda = Render 'Simulated conda activation environment' @{ CONDA_DEFAULT_ENV = 'context-conda'; CONDA_PREFIX = $Venv }
 Assert ($Conda -match '\[py:context-conda\]') 'Conda environment name missing'
+$Wsl = Render 'Simulated WSL environment' @{ WSL_DISTRO_NAME = 'Ubuntu' }
+Assert ($Wsl -match '\[WSL\]') 'WSL environment indicator missing'
+$Container = Render 'Simulated container environment' @{ CONTAINER = 'podman' }
+Assert ($Container -match '\[CONTAINER\]') 'Container environment indicator missing'
 Write-Host "Actual identity elevated: $Elevated. No elevation was simulated. Scratch retained: $Scratch"
