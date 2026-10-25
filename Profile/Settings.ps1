@@ -21,7 +21,7 @@ $Global:DefaultSettings = [ordered]@{
     "Microsoft.PowerShell.Profile:GitPromptTimeoutMs"  = 1500            # Max time to wait for `git status` before showing a placeholder
     "Microsoft.PowerShell.Profile:PromptMinDurationSeconds" = 2          # Show the last command duration only above this threshold
     "Microsoft.PowerShell.Profile:EnableZoxide"        = $true           # Initialize zoxide when it is installed
-    "Microsoft.PowerShell.Profile:ShowSystemInfo"        = $true           # Show lightweight system info on startup
+    "Microsoft.PowerShell.Profile:ShowSystemInfo"        = $false           # Show lightweight system info on startup (use 'sysinfo' to show on demand)
     "Microsoft.PowerShell.Profile:ShowPublicIP"          = $false          # Show public IP in system info banner (network request)
 }
 
