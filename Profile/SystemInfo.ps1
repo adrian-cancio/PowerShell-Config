@@ -3,7 +3,9 @@
 # ----------------------------------
 function Show-SystemInfo {
     [CmdletBinding()]
-    param()
+    param(
+        [switch]$PublicIP
+    )
 
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
@@ -19,8 +21,11 @@ function Show-SystemInfo {
     $wmStr = ""
     $termStr = ""
     $cpuStr = ""
+    $loadStr = ""
     $batteryStr = ""
     $diskStr = ""
+    $localIpStr = ""
+    $publicIpStr = ""
     try {
         if ($IsLinux -and (Test-Path "/proc/uptime")) {
             $sec = [double]((Get-Content "/proc/uptime" -Raw).Split()[0])
@@ -49,6 +54,26 @@ function Show-SystemInfo {
     catch {
         $uptimeStr = "n/a"
     }
+
+    # Load average (Linux /proc/loadavg, macOS sysctl)
+    try {
+        if ($IsLinux -and (Test-Path "/proc/loadavg")) {
+            $rawLoad = Get-Content "/proc/loadavg" -Raw -ErrorAction SilentlyContinue
+            if ($rawLoad) {
+                $parts = $rawLoad.Trim().Split()
+                if ($parts.Length -ge 3) {
+                    $loadStr = "$($parts[0]), $($parts[1]), $($parts[2])"
+                }
+            }
+        }
+        elseif ($IsMacOS) {
+            $rawLoad = & sysctl -n vm.loadavg 2>$null
+            if ($rawLoad -match '\{\s*([0-9.]+)\s+([0-9.]+)\s+([0-9.]+)\s*\}') {
+                $loadStr = "$($Matches[1]), $($Matches[2]), $($Matches[3])"
+            }
+        }
+    }
+    catch {}
 
     # Kernel, packages, WM, terminal, CPU, disk, battery (Linux only)
     if ($IsLinux) {
@@ -144,6 +169,57 @@ function Show-SystemInfo {
         $memStr = "n/a"
     }
 
+    # Local IP (parsed from ip -brief addr or .NET cross-platform)
+    try {
+        if ($IsLinux -and (Get-Command ip -ErrorAction SilentlyContinue)) {
+            $ipLines = & ip -brief addr 2>$null | Where-Object { $_ -match '\s+UP\s+' -and $_ -notmatch '^lo\b' }
+            foreach ($line in $ipLines) {
+                if ($line -match '\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/\d+') {
+                    $localIpStr = $Matches[1]
+                    break
+                }
+            }
+        }
+    } catch {}
+
+    if (-not $localIpStr) {
+        try {
+            $interfaces = [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() |
+                Where-Object { $_.OperationalStatus -eq 'Up' -and $_.NetworkInterfaceType -notin 'Loopback','Tunnel' }
+            foreach ($iface in $interfaces) {
+                $addr = $iface.GetIPProperties().UnicastAddresses |
+                    Where-Object { $_.Address.AddressFamily -eq 'InterNetwork' -and $_.Address.ToString() -notlike '127.*' -and $_.Address.ToString() -notlike '169.254.*' } |
+                    Select-Object -First 1
+                if ($addr) {
+                    $localIpStr = $addr.Address.ToString()
+                    break
+                }
+            }
+        } catch {}
+    }
+
+    # Public IP on-demand (only when requested via -PublicIP or setting enabled)
+    $shouldFetchPublic = $PublicIP.IsPresent -or ($Global:UserSettings["Microsoft.PowerShell.Profile:ShowPublicIP"] -eq $true)
+    if ($shouldFetchPublic) {
+        try {
+            $rawPublic = (Invoke-RestMethod -Uri "https://ifconfig.me/ip" -TimeoutSec 3 -ErrorAction Stop).ToString().Trim()
+            if ($rawPublic -match '(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})') {
+                $publicIpStr = $Matches[1]
+            }
+        }
+        catch {
+            try {
+                $rawPublic = (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 3 -ErrorAction Stop).ToString().Trim()
+                if ($rawPublic -match '(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})') {
+                    $publicIpStr = $Matches[1]
+                }
+            }
+            catch {
+                $publicIpStr = "n/a"
+            }
+        }
+    }
+
     $sw.Stop()
 
     $ansiReset = [char]27 + "[0m"
@@ -160,9 +236,12 @@ function Show-SystemInfo {
     if ($wmStr)     { $pairs += @{L = "${ansiLabel}WM:${ansiReset}"; V = "${ansiValue}$wmStr${ansiReset}"} }
     if ($termStr)   { $pairs += @{L = "${ansiLabel}Term:${ansiReset}"; V = "${ansiValue}$termStr${ansiReset}"} }
     if ($cpuStr)    { $pairs += @{L = "${ansiLabel}CPU:${ansiReset}"; V = "${ansiValue}$cpuStr${ansiReset}"} }
+    if ($loadStr)   { $pairs += @{L = "${ansiLabel}Load:${ansiReset}"; V = "${ansiValue}$loadStr${ansiReset}"} }
     if ($memStr)    { $pairs += @{L = "${ansiLabel}Mem:${ansiReset}"; V = "${ansiValue}$memStr${ansiReset}"} }
     if ($diskStr)   { $pairs += @{L = "${ansiLabel}Disk:${ansiReset}"; V = "${ansiValue}$diskStr${ansiReset}"} }
     if ($batteryStr){ $pairs += @{L = "${ansiLabel}Bat:${ansiReset}"; V = "${ansiValue}$batteryStr${ansiReset}"} }
+    if ($localIpStr){ $pairs += @{L = "${ansiLabel}Local IP:${ansiReset}"; V = "${ansiValue}$localIpStr${ansiReset}"} }
+    if ($publicIpStr){ $pairs += @{L = "${ansiLabel}Public IP:${ansiReset}"; V = "${ansiValue}$publicIpStr${ansiReset}"} }
     $pairs += @{L = "${ansiLabel}Rendered:${ansiReset}"; V = "${ansiValue}{0:N0} ms${ansiReset}" -f $sw.ElapsedMilliseconds}
 
     # Longitud visible máxima de etiquetas (sin códigos ANSI)
@@ -172,7 +251,6 @@ function Show-SystemInfo {
         if ($clean.Length -gt $maxVisible) { $maxVisible = $clean.Length }
     }
 
-    Write-Host ""
     Write-Host ("  ${ansiGold}SYSTEM${ansiReset}")
     foreach ($p in $pairs) {
         $cleanLen = ($p.L -replace "\x1b\[[0-9;]*m","").Length
@@ -181,6 +259,9 @@ function Show-SystemInfo {
     }
     Write-Host ""
 }
+
+# Ensure sysinfo alias is always available
+Set-Alias -Name sysinfo -Value Show-SystemInfo
 
 # Auto-show on startup when enabled (default: true)
 if ($Global:UserSettings["Microsoft.PowerShell.Profile:ShowSystemInfo"] -eq $true) {

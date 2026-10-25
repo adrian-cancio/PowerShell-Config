@@ -22,8 +22,12 @@
       "segments": [
         {
           "type": "git", "style": "plain", "foreground": "#fabd2f",
-          "template": "{{ .HEAD }}{{ if .BranchStatus }} {{ .BranchStatus }}{{ end }}{{ if .Staging.Changed }} <#b8bb26>{{ .Staging.String }}</>{{ end }}{{ if .Working.Changed }} <#fabd2f>~{{ .Working.String }}</>{{ end }}{{ if not (or .Working.Changed .Staging.Changed) }} <#b8bb26>✓</>{{ end }}<#928374> | </>",
-          "options": { "fetch_status": true }
+          "template": "{{ .HEAD }}{{ if .Ahead }} <#b8bb26>↑{{ .Ahead }}</>{{ end }}{{ if .Behind }} <#fb4934>↓{{ .Behind }}</>{{ end }}{{ if and (eq .Ahead 0) (eq .Behind 0) .BranchStatus }} <#928374>{{ .BranchStatus }}</>{{ end }}{{ if .Staging.Changed }} <#b8bb26>{{ .Staging.String }}</>{{ end }}{{ if .Working.Changed }} <#fe8019>{{ .Working.String }}</>{{ end }}{{ if not (or .Working.Changed .Staging.Changed) }} <#b8bb26>✓</>{{ end }}<#928374> | </>",
+          "options": {
+            "fetch_status": true,
+            "branch_icon": "<#d3869b></> ",
+            "commit_icon": "<#d3869b></> "
+          }
         },
         { "type": "status", "style": "plain", "foreground": "#b8bb26", "foreground_templates": [ "{{ if gt .Code 0 }}#fb4934{{ end }}" ], "template": "|>", "options": { "always_enabled": true } }
       ]

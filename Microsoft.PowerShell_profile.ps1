@@ -1,4 +1,5 @@
 $ProfileModuleRoot = Join-Path $PSScriptRoot "Profile"
+$Global:ProfileDirectory = $ProfileModuleRoot
 
 $ProfileParts = @(
     "Settings.ps1"
@@ -9,14 +10,8 @@ $ProfileParts = @(
     "Shortcuts.ps1"
     "SystemInfo.ps1"
     "Pip.ps1"
-    "Copilot.ps1"
-    "SecureApiKey.ps1"
-    "GeminiTools.ps1"
-    "GeminiChat.ps1"
-    "GeminiCommit.ps1"
     "Aliases.ps1"
-    "Completions.ps1"
-    "Diagnostics.ps1"
+    "LazyLoaders.ps1"
 )
 
 $Global:ProfileLoadTimings = [Collections.Generic.List[object]]::new()
