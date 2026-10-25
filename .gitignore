@@ -1,0 +1,9 @@
+/.vscode/
+/Help/
+/Modules/
+/Scripts/
+
+/powershell.config.json
+/profile.ps1
+*.key
+/%TEMP%/
