@@ -146,23 +146,53 @@ function Show-SystemInfo {
 
     $sw.Stop()
 
-    $labelWidth = 10
-    $fmt = "  ${ansiGray}{0,-$labelWidth}${ansiReset} {1}"
+    $ansiReset = [char]27 + "[0m"
+    $ansiGray  = [char]27 + "[38;5;223m"
+    $ansiGold  = [char]27 + "[38;5;214m"
+
+    # Colores Gruvbox por etiqueta (fg256)
+    $cUser   = [char]27 + "[38;5;142m"  # green
+    $cOS     = [char]27 + "[38;5;131m"  # blue
+    $cKernel = [char]27 + "[38;5;175m"  # purple
+    $cUp     = [char]27 + "[38;5;208m"  # orange
+    $cPkgs   = [char]27 + "[38;5;144m"  # cyan-green
+    $cWm     = [char]27 + "[38;5;174m"  # magenta
+    $cTerm   = [char]27 + "[38;5;164m"  # light gray-green
+    $cCpu    = [char]27 + "[38;5;167m"  # red
+    $cMem    = [char]27 + "[38;5;214m"  # yellow
+    $cDisk   = [char]27 + "[38;5;241m"  # gray
+    $cBat    = [char]27 + "[38;5;142m"  # green
+    $cRender = [char]27 + "[38;5;241m"  # gray
+
+    $maxLabelLen = 10
+    $pairs = @()
+    $pairs += @{L = "${cUser}User:${ansiReset}"; V = "$userName@$hostName"}
+    $pairs += @{L = "${cOS}OS:${ansiReset}";   V = "$osDesc ($osArch)"}
+    if ($kernelStr) { $pairs += @{L = "${cKernel}Kernel:${ansiReset}"; V = $kernelStr} }
+    if ($uptimeStr) { $pairs += @{L = "${cUp}Up:${ansiReset}"; V = $uptimeStr} }
+    if ($pkgStr)    { $pairs += @{L = "${cPkgs}Pkgs:${ansiReset}"; V = $pkgStr} }
+    if ($wmStr)     { $pairs += @{L = "${cWm}WM:${ansiReset}"; V = $wmStr} }
+    if ($termStr)   { $pairs += @{L = "${cTerm}Term:${ansiReset}"; V = $termStr} }
+    if ($cpuStr)    { $pairs += @{L = "${cCpu}CPU:${ansiReset}"; V = $cpuStr} }
+    if ($memStr)    { $pairs += @{L = "${cMem}Mem:${ansiReset}"; V = $memStr} }
+    if ($diskStr)   { $pairs += @{L = "${cDisk}Disk:${ansiReset}"; V = $diskStr} }
+    if ($batteryStr){ $pairs += @{L = "${cBat}Bat:${ansiReset}"; V = $batteryStr} }
+    $pairs += @{L = "${cRender}Rendered:${ansiReset}"; V = "{0:N0} ms" -f $sw.ElapsedMilliseconds}
+
+    # Longitud visible máxima de etiquetas (sin códigos ANSI)
+    $maxVisible = 0
+    foreach ($p in $pairs) {
+        $clean = $p.L -replace "\x1b\[[0-9;]*m",""
+        if ($clean.Length -gt $maxVisible) { $maxVisible = $clean.Length }
+    }
 
     Write-Host ""
     Write-Host ("  ${ansiGold}SYSTEM${ansiReset}")
-    Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}User:${ansiReset}", "$userName@$hostName"))
-    Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}OS:${ansiReset}", "$osDesc ($osArch)"))
-    if ($kernelStr) { Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}Kernel:${ansiReset}", $kernelStr)) }
-    if ($uptimeStr) { Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}Up:${ansiReset}", $uptimeStr)) }
-    if ($pkgStr)    { Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}Pkgs:${ansiReset}", $pkgStr)) }
-    if ($wmStr)     { Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}WM:${ansiReset}", $wmStr)) }
-    if ($termStr)   { Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}Term:${ansiReset}", $termStr)) }
-    if ($cpuStr)    { Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}CPU:${ansiReset}", $cpuStr)) }
-    if ($memStr)    { Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}Mem:${ansiReset}", $memStr)) }
-    if ($diskStr)   { Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}Disk:${ansiReset}", $diskStr)) }
-    if ($batteryStr){ Write-Host ("{0,-$labelWidth}{1}" -f ("${ansiGray}Bat:${ansiReset}", $batteryStr)) }
-    Write-Host ("{0,-$labelWidth}{1:N0} ms" -f ("${ansiGray}Rendered:${ansiReset}", $sw.ElapsedMilliseconds))
+    foreach ($p in $pairs) {
+        $cleanLen = ($p.L -replace "\x1b\[[0-9;]*m","").Length
+        $pad = " " * ($maxVisible - $cleanLen + 1)
+        Write-Host ("{0}{1}{2}" -f $p.L, $pad, $p.V)
+    }
     Write-Host ""
 }
 
