@@ -251,7 +251,7 @@ function Show-SystemInfo {
         if ($clean.Length -gt $maxVisible) { $maxVisible = $clean.Length }
     }
 
-    Write-Host ("  ${ansiGold}SYSTEM${ansiReset}")
+    Write-Host ("${ansiGold}SYSTEM${ansiReset}")
     foreach ($p in $pairs) {
         $cleanLen = ($p.L -replace "\x1b\[[0-9;]*m","").Length
         $pad = " " * ($maxVisible - $cleanLen + 1)
@@ -263,10 +263,18 @@ function Show-SystemInfo {
 # Ensure sysinfo alias is always available
 Set-Alias -Name sysinfo -Value Show-SystemInfo
 
-# Auto-show on startup when enabled (default: true)
+# Auto-show on first interactive session of the day (default: true)
 if ($Global:UserSettings["Microsoft.PowerShell.Profile:ShowSystemInfo"] -eq $true) {
     try {
-        Show-SystemInfo
+        $markRoot = Join-Path $HOME ".local/share/powershell-profile"
+        $null = New-Item -ItemType Directory -Path $markRoot -Force -ErrorAction SilentlyContinue
+        $markFile = Join-Path $markRoot ("sysinfo-" + (Get-Date).ToString("yyyyMMdd"))
+        $showToday = -not (Test-Path -LiteralPath $markFile -PathType Leaf)
+        if ($showToday) {
+            Show-SystemInfo
+            # Mark that we showed it today (best effort; failure is not fatal)
+            try { $null = New-Item -ItemType File -Path $markFile -Force -ErrorAction SilentlyContinue } catch {}
+        }
     }
     catch {
         Write-Warning "System info banner failed: $($_.Exception.Message)"
